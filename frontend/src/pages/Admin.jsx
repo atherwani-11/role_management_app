@@ -2,112 +2,64 @@ import React, { useEffect, useState, useCallback } from "react";
 import API from "../api";
 import { useAuth } from "../AuthContext";
 
-const Shopkeeper = () => {
+const Admin = () => {
   const { user, logout } = useAuth();
 
-  const [items, setItems] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
-  const [error, setError] = useState("");
-
-  const [formData, setFormData] = useState({
-    title: "",
-    description: "",
-    price: "",
-    type: "product",
-  });
+  const [stats, setStats] = useState({ users: 0, products: 0, orders: 0 });
 
   const headers = { email: user.email };
 
-  const fetchItems = useCallback(async () => {
-    try {
-      const res = await API.get("/shopkeeper/products", { headers });
-      setItems(res.data.products || []);
-    } catch (err) {
-      console.error(err);
-      setError("Failed to load items");
-    }
-  }, [user.email]);
+  const fetchAdminData = useCallback(async () => {
+    const usersRes = await API.get("/admin/users", { headers });
+    const productsRes = await API.get("/admin/products", { headers });
+    const ordersRes = await API.get("/admin/orders", { headers });
+    const statsRes = await API.get("/admin/stats", { headers });
 
-  const fetchOrders = useCallback(async () => {
-    try {
-      const res = await API.get("/shopkeeper/orders", { headers });
-      setOrders(res.data.orders || []);
-    } catch (err) {
-      console.error(err);
-      setError("Failed to load orders");
-    }
+    setUsers(usersRes.data.users || []);
+    setProducts(productsRes.data.products || []);
+    setOrders(ordersRes.data.orders || []);
+    setStats(statsRes.data.stats || {});
   }, [user.email]);
 
   useEffect(() => {
-    fetchItems();
-    fetchOrders();
-  }, [fetchItems, fetchOrders]);
+    fetchAdminData();
+  }, [fetchAdminData]);
 
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+  const deleteUser = async (id) => {
+    if (!window.confirm("Delete this user?")) return;
+    await API.delete(`/admin/users/${id}`, { headers });
+    fetchAdminData();
   };
 
-  const addItem = async (e) => {
-    e.preventDefault();
-    setError("");
-
-    try {
-      const res = await API.post("/shopkeeper/products", formData, {
-        headers,
-      });
-
-      if (res.data.status === "Success") {
-        alert(res.data.message);
-
-        setFormData({
-          title: "",
-          description: "",
-          price: "",
-          type: "product",
-        });
-
-        fetchItems();
-      } else {
-        setError(res.data.message);
-      }
-    } catch (err) {
-      console.error(err);
-      setError("Failed to upload item");
-    }
+  const deleteProduct = async (id) => {
+    if (!window.confirm("Delete this product?")) return;
+    await API.delete(`/admin/products/${id}`, { headers });
+    fetchAdminData();
   };
 
-  const deleteItem = async (id) => {
-    if (!window.confirm("Delete this item?")) return;
-
-    try {
-      await API.delete(`/shopkeeper/products/${id}`, { headers });
-      fetchItems();
-    } catch (err) {
-      console.error(err);
-      setError("Failed to delete item");
-    }
+  const deleteOrder = async (id) => {
+    if (!window.confirm("Delete this order?")) return;
+    await API.delete(`/admin/orders/${id}`, { headers });
+    fetchAdminData();
   };
 
-  const updateStatus = async (id, status) => {
-    try {
-      await API.put(`/orders/${id}/status`, { status }, { headers });
-      fetchOrders();
-    } catch (err) {
-      console.error(err);
-      setError("Failed to update order");
-    }
+  const updateOrderStatus = async (id, status) => {
+    await API.put(`/orders/${id}/status`, { status }, { headers });
+    fetchAdminData();
   };
 
   return (
     <div className="layout">
       <aside className="sidebar">
         <div>
-          <h2>Shopkeeper</h2>
+          <h2>Admin</h2>
           <p>{user.name}</p>
           <p>{user.email}</p>
+          <p>Contact: admin@marketplace.com</p>
+          <p>Phone: +91 9876543210</p>
         </div>
 
         <button className="logout-btn" onClick={logout}>
@@ -117,119 +69,132 @@ const Shopkeeper = () => {
 
       <main className="main">
         <div className="top-card">
-          <h1>Shopkeeper Panel</h1>
-          <p>Upload products and services for customers</p>
+          <h1>Admin Dashboard</h1>
+          <p>Manage users, products, orders and platform data</p>
         </div>
 
-        {error && <div className="error">{error}</div>}
-
-        <form className="form-card" onSubmit={addItem}>
-          <h2>Add Product / Service</h2>
-
-          <label>Title</label>
-          <input
-            name="title"
-            placeholder="Enter title"
-            value={formData.title}
-            onChange={handleChange}
-            required
-          />
-
-          <label>Description</label>
-          <textarea
-            name="description"
-            placeholder="Enter description"
-            value={formData.description}
-            onChange={handleChange}
-            required
-          />
-
-          <label>Price</label>
-          <input
-            name="price"
-            type="number"
-            placeholder="Enter price"
-            value={formData.price}
-            onChange={handleChange}
-            required
-          />
-
-          <label>Type</label>
-          <select name="type" value={formData.type} onChange={handleChange}>
-            <option value="product">Product</option>
-            <option value="service">Service</option>
-          </select>
-
-          <button type="submit">Upload</button>
-        </form>
-
-        <h2 className="section-title">My Products & Services</h2>
-
-        {items.length === 0 ? (
-          <div className="empty">No items uploaded yet</div>
-        ) : (
-          <div className="grid">
-            {items.map((item) => (
-              <div className="card" key={item.id}>
-                <span className="badge">{item.type}</span>
-                <h3>{item.title}</h3>
-                <p>{item.description}</p>
-                <div className="price">₹{Number(item.price).toFixed(2)}</div>
-                <button className="danger-btn" onClick={() => deleteItem(item.id)}>
-                  Delete
-                </button>
-              </div>
-            ))}
+        <div className="stats">
+          <div className="stat-card">
+            <span>Users</span>
+            <h2>{stats.users}</h2>
           </div>
-        )}
 
-        <h2 className="section-title">Orders Received</h2>
+          <div className="stat-card">
+            <span>Products</span>
+            <h2>{stats.products}</h2>
+          </div>
 
-        {orders.length === 0 ? (
-          <div className="empty">No orders received yet</div>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Customer</th>
-                <th>Item</th>
-                <th>Price</th>
-                <th>Status</th>
-                <th>Action</th>
+          <div className="stat-card">
+            <span>Orders</span>
+            <h2>{stats.orders}</h2>
+          </div>
+        </div>
+
+        <h2 className="section-title">Manage Users</h2>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.id}>
+                <td>{u.name}</td>
+                <td>{u.email}</td>
+                <td>{u.role}</td>
+                <td>
+                  <button className="danger-btn" onClick={() => deleteUser(u.id)}>
+                    Delete
+                  </button>
+                </td>
               </tr>
-            </thead>
+            ))}
+          </tbody>
+        </table>
 
-            <tbody>
-              {orders.map((order) => (
-                <tr key={order.id}>
-                  <td>{order.customer_name}</td>
-                  <td>{order.title}</td>
-                  <td>₹{Number(order.price).toFixed(2)}</td>
-                  <td>
-                    <span className="status">{order.status}</span>
-                  </td>
-                  <td>
-                    <button onClick={() => updateStatus(order.id, "accepted")}>
-                      Accept
-                    </button>
-                    <button onClick={() => updateStatus(order.id, "completed")}>
-                      Complete
-                    </button>
-                    <button
-                      className="danger-btn"
-                      onClick={() => updateStatus(order.id, "rejected")}
-                    >
-                      Reject
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <h2 className="section-title">Manage Products</h2>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Shopkeeper</th>
+              <th>Price</th>
+              <th>Stock</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {products.map((p) => (
+              <tr key={p.id}>
+                <td>{p.title}</td>
+                <td>{p.shopkeeper_name}</td>
+                <td>₹{Number(p.price).toFixed(2)}</td>
+                <td>
+                  {p.quantity} {p.unit}
+                </td>
+                <td>
+                  <button className="danger-btn" onClick={() => deleteProduct(p.id)}>
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <h2 className="section-title">Manage Orders</h2>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Bill ID</th>
+              <th>Customer</th>
+              <th>Shopkeeper</th>
+              <th>Product</th>
+              <th>Total</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {orders.map((o) => (
+              <tr key={o.id}>
+                <td>INV-{o.id}</td>
+                <td>{o.customer_name}</td>
+                <td>{o.shopkeeper_name}</td>
+                <td>{o.title}</td>
+                <td>₹{Number(o.total_amount || 0).toFixed(2)}</td>
+                <td>{o.status}</td>
+                <td>
+                  <button onClick={() => updateOrderStatus(o.id, "accepted")}>
+                    Accept
+                  </button>
+                  <button onClick={() => updateOrderStatus(o.id, "completed")}>
+                    Complete
+                  </button>
+                  <button onClick={() => updateOrderStatus(o.id, "rejected")}>
+                    Reject
+                  </button>
+                  <button className="danger-btn" onClick={() => deleteOrder(o.id)}>
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </main>
     </div>
   );
 };
 
-export default Shopkeeper;
+export default Admin;

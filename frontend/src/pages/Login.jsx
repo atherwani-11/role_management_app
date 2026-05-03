@@ -23,13 +23,9 @@ const Login = () => {
   };
 
   const goByRole = (role) => {
-    if (role === "admin") {
-      navigate("/admin");
-    } else if (role === "shopkeeper") {
-      navigate("/shopkeeper");
-    } else {
-      navigate("/customer");
-    }
+    if (role === "admin") navigate("/admin");
+    else if (role === "shopkeeper") navigate("/shopkeeper");
+    else navigate("/customer");
   };
 
   const handleSubmit = async (e) => {
@@ -87,6 +83,10 @@ const Login = () => {
         <button type="submit" disabled={loading}>
           {loading ? "Logging in..." : "Login"}
         </button>
+
+        <p>
+          <Link to="/forgot-password">Forgot Password?</Link>
+        </p>
 
         <p>
           No account? <Link to="/signup">Create Account</Link>
