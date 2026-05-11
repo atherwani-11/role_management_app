@@ -1,181 +1,209 @@
-import React, { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import API from "../api";
-import { useAuth } from "../AuthContext";
+import { Link, useNavigate } from "react-router-dom";
 
-const Customer = () => {
-  const { user, logout, login } = useAuth();
-
+function Customer() {
+  const navigate = useNavigate();
+  const user = JSON.parse(localStorage.getItem("user")) || {};
   const [products, setProducts] = useState([]);
-  const [orders, setOrders] = useState([]);
   const [quantities, setQuantities] = useState({});
-  const [error, setError] = useState("");
+  const [toastMessage, setToastMessage] = useState("");
+  const [toastType, setToastType] = useState("info");
+  const [profileName, setProfileName] = useState(user.name || "");
 
-  const [editName, setEditName] = useState(false);
-  const [newName, setNewName] = useState(user.name);
+  const customerEmail = user?.email || localStorage.getItem("email") || "";
+  const customerId = user?.id;
 
-  const headers = { email: user.email };
+  const showToast = (type, message) => {
+    setToastType(type);
+    setToastMessage(message);
+    window.setTimeout(() => {
+      setToastMessage("");
+    }, 3500);
+  };
 
-  const fetchProducts = useCallback(async () => {
-    const res = await API.get("/products", { headers });
-    setProducts(res.data.products || []);
-  }, [user.email]);
+  const loadProducts = async () => {
+    try {
+      const res = await API.get("/products");
+      setProducts(res.data);
+      const initialQuantities = (res.data || []).reduce((acc, product) => {
+        acc[product.id] = 1;
+        return acc;
+      }, {});
+      setQuantities(initialQuantities);
+    } catch (err) {
+      showToast("error", "Failed to load products.");
+    }
+  };
 
-  const fetchOrders = useCallback(async () => {
-    const res = await API.get("/customer/orders", { headers });
-    setOrders(res.data.orders || []);
-  }, [user.email]);
+  const addToCart = async (productId) => {
+    try {
+      if (!customerEmail) {
+        showToast("error", "Please login first to add items to your cart.");
+        return false;
+      }
+
+      const quantity = Number(quantities[productId]) || 1;
+      const product = products.find((item) => item.id === productId);
+
+      if (!product) {
+        showToast("error", "Product not found.");
+        return false;
+      }
+
+      if (quantity > product.stock) {
+        showToast("error", `Only ${product.stock} item(s) available in stock.`);
+        return false;
+      }
+
+      await API.post("/cart", {
+        customer_email: customerEmail,
+        product_id: productId,
+        quantity
+      });
+
+      showToast("success", `Added ${quantity} item(s) to cart.`);
+      return true;
+    } catch (err) {
+      showToast("error", err.response?.data?.message || "Failed to add cart.");
+      return false;
+    }
+  };
+
+  const buyNow = async (productId) => {
+    const added = await addToCart(productId);
+    if (added) {
+      navigate("/cart");
+    }
+  };
+
+  const logout = () => {
+    localStorage.removeItem("user");
+    localStorage.removeItem("email");
+    navigate("/login");
+  };
+
+  const updateProfile = async (e) => {
+    e.preventDefault();
+    try {
+      await API.put(`/users/${customerId}`, { name: profileName });
+      localStorage.setItem("user", JSON.stringify({ ...user, name: profileName }));
+      showToast("success", "Name updated successfully.");
+    } catch (err) {
+      showToast("error", err.response?.data?.message || "Failed to update name.");
+    }
+  };
 
   useEffect(() => {
-    fetchProducts().catch(() => setError("Failed to load products"));
-    fetchOrders().catch(() => setError("Failed to load purchase history"));
-  }, [fetchProducts, fetchOrders]);
-
-  const updateName = async () => {
-    const res = await API.put("/user/name", { name: newName }, { headers });
-
-    if (res.data.status === "Success") {
-      login(res.data.user);
-      setEditName(false);
-    }
-  };
-
-  const increaseQty = (id) => {
-    setQuantities((prev) => ({
-      ...prev,
-      [id]: Number(prev[id] || 1) + 1,
-    }));
-  };
-
-  const decreaseQty = (id) => {
-    setQuantities((prev) => ({
-      ...prev,
-      [id]: Math.max(1, Number(prev[id] || 1) - 1),
-    }));
-  };
-
-  const buyProduct = async (product) => {
-    const qty = Number(quantities[product.id] || 1);
-
-    const res = await API.post(
-      `/orders/${product.id}`,
-      { quantity: qty },
-      { headers }
-    );
-
-    if (res.data.status === "Success") {
-      alert("Purchased successfully");
-      fetchProducts();
-      fetchOrders();
-    } else {
-      setError(res.data.message || "Purchase failed");
-    }
-  };
+    loadProducts();
+  }, []);
 
   return (
-    <div className="layout">
-      <aside className="sidebar">
+    <div className="page">
+      <div className="topbar">
         <div>
-          <h2>Customer</h2>
-          <p>{user.name}</p>
-          <p>{user.email}</p>
+          <h1>Customer Portal</h1>
+          <p>Welcome back, {user.name || "Customer"}.</p>
+        </div>
+        <div className="action-row">
+          <Link to="/cart" className="btn">Cart</Link>
+          <Link to="/customer-bills" className="btn">My Bills</Link>
+          <Link to="/customer-contact" className="btn secondary">Contact Us</Link>
+          <button className="btn danger" onClick={logout}>Logout</button>
+        </div>
+      </div>
 
-          {editName ? (
-            <>
-              <input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
+      {toastMessage && (
+        <div className={`toast ${toastType}`}>
+          {toastMessage}
+        </div>
+      )}
+      <form onSubmit={updateProfile} className="form">
+        <h2>Edit Your Name</h2>
+        <input
+          type="text"
+          placeholder="Your Name"
+          required
+          value={profileName}
+          onChange={(e) => setProfileName(e.target.value)}
+        />
+        <button className="btn" type="submit">Save Name</button>
+      </form>
+      <p className="small-tag">Need help? Contact atherwani333@gmail.com or call +91 9149756267.</p>
+
+      <div className="grid">
+        {products.map((product) => (
+          <div className="card" key={product.id}>
+            {product.image && (
+              <img
+                src={`${API.defaults.baseURL}${product.image}`}
+                alt={product.name}
+                className="product-img"
               />
-              <button onClick={updateName}>Save Name</button>
-            </>
-          ) : (
-            <button onClick={() => setEditName(true)}>Edit Name</button>
-          )}
+            )}
 
-          <p>Contact us:</p>
-          <p>support@marketplace.com</p>
-          <p>+91 9876543210</p>
-        </div>
+            <h3>{product.name}</h3>
+            <p>{product.description}</p>
+            <h2>₹{product.price}</h2>
+            <p>Stock: {product.stock}</p>
 
-        <button className="logout-btn" onClick={logout}>
-          Logout
-        </button>
-      </aside>
+            <div className="action-row qty-row">
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setQuantities((prev) => ({
+                  ...prev,
+                  [product.id]: Math.max(1, (prev[product.id] || 1) - 1)
+                }))}
+                disabled={(quantities[product.id] || 1) <= 1}
+              >
+                -
+              </button>
+              <input
+                type="number"
+                min="1"
+                value={quantities[product.id] || 1}
+                onChange={(e) => setQuantities((prev) => ({
+                  ...prev,
+                  [product.id]: Math.max(1, Number(e.target.value) || 1)
+                }))}
+                className="qty-input"
+              />
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setQuantities((prev) => ({
+                  ...prev,
+                  [product.id]: (prev[product.id] || 1) + 1
+                }))}
+              >
+                +
+              </button>
+            </div>
 
-      <main className="main">
-        <div className="top-card">
-          <h1>Marketplace</h1>
-          <p>Buy products and services online</p>
-        </div>
-
-        {error && <div className="error">{error}</div>}
-
-        <h2 className="section-title">Available Products</h2>
-
-        <div className="grid">
-          {products.map((product) => {
-            const qty = Number(quantities[product.id] || 1);
-
-            return (
-              <div className="card" key={product.id}>
-                <span className="badge">{product.type}</span>
-                <h3>{product.title}</h3>
-                <p>{product.description}</p>
-                <p>Seller: {product.shopkeeper_name}</p>
-
-                <div className="price">
-                  ₹{Number(product.price).toFixed(2)} / {product.unit}
-                </div>
-
-                <div>
-                  <button onClick={() => decreaseQty(product.id)}>-</button>
-                  <strong style={{ margin: "0 12px" }}>{qty}</strong>
-                  <button onClick={() => increaseQty(product.id)}>+</button>
-                </div>
-
-                <button onClick={() => buyProduct(product)}>Buy Now</button>
-              </div>
-            );
-          })}
-        </div>
-
-        <h2 className="section-title">Purchase History</h2>
-
-        {orders.length === 0 ? (
-          <div className="empty">No purchases yet</div>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Bill ID</th>
-                <th>Product</th>
-                <th>Qty</th>
-                <th>Total</th>
-                <th>Seller</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {orders.map((order) => (
-                <tr key={order.id}>
-                  <td>INV-{order.id}</td>
-                  <td>{order.title}</td>
-                  <td>
-                    {order.quantity} {order.unit}
-                  </td>
-                  <td>₹{Number(order.total_amount || 0).toFixed(2)}</td>
-                  <td>{order.shopkeeper_name}</td>
-                  <td>
-                    <span className="status">{order.status}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </main>
+            <div className="action-row">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => addToCart(product.id)}
+                disabled={product.stock <= 0}
+              >
+                Add to Cart
+              </button>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => buyNow(product.id)}
+                disabled={product.stock <= 0}
+              >
+                Buy Now
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
-};
+}
 
 export default Customer;

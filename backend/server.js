@@ -1,6 +1,9 @@
 const express = require("express");
-const cors = require("cors");
 const mysql = require("mysql2/promise");
+const cors = require("cors");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 const bcrypt = require("bcryptjs");
 require("dotenv").config();
 
@@ -8,6 +11,17 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+const uploadsPath = path.join(__dirname, "uploads");
+
+if (!fs.existsSync(uploadsPath)) {
+  fs.mkdirSync(uploadsPath, { recursive: true });
+}
+
+app.use("/uploads", express.static(uploadsPath));
+
+const PORT = process.env.PORT || 8081;
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST || "localhost",
@@ -15,73 +29,223 @@ const pool = mysql.createPool({
   password: process.env.DB_PASSWORD || "",
   database: process.env.DB_NAME || "role_management_app",
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 10
 });
 
-const verifyUser = async (req, res, next) => {
-  try {
-    const email = req.headers.email;
+/* CREATE TABLES */
 
-    if (!email) {
-      return res.status(401).json({ status: "Error", message: "Email missing" });
-    }
+async function initTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255) UNIQUE NOT NULL,
+      password VARCHAR(255) NOT NULL,
+      role VARCHAR(50) DEFAULT 'customer',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
 
-    const [users] = await pool.query("SELECT * FROM users WHERE email = ?", [
-      email,
-    ]);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      phone VARCHAR(50),
+      email VARCHAR(255),
+      address TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
 
-    if (users.length === 0) {
-      return res.status(401).json({ status: "Error", message: "User not found" });
-    }
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS products (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      shopkeeper_id INT DEFAULT NULL,
+      supplier_id INT DEFAULT NULL,
+      title VARCHAR(255) NOT NULL,
+      description TEXT,
+      price DECIMAL(10,2) NOT NULL,
+      quantity INT DEFAULT 0,
+      image VARCHAR(255),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
 
-    req.user = users[0];
-    next();
-  } catch (err) {
-    res.status(500).json({ status: "Error", message: "Auth failed" });
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS cart (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      customer_email VARCHAR(255) NOT NULL,
+      product_id INT NOT NULL,
+      quantity INT DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      customer_email VARCHAR(255) NOT NULL,
+      customer_name VARCHAR(255),
+      phone VARCHAR(50),
+      address TEXT,
+      payment_method VARCHAR(100) DEFAULT 'Cash on Delivery',
+      total_amount DECIMAL(10,2) NOT NULL,
+      status VARCHAR(50) DEFAULT 'Pending',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS order_items (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      order_id INT NOT NULL,
+      product_id INT NOT NULL,
+      product_name VARCHAR(255) NOT NULL,
+      price DECIMAL(10,2) NOT NULL,
+      quantity INT DEFAULT 1,
+      subtotal DECIMAL(10,2) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS supplier_stock (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      shopkeeper_id INT DEFAULT NULL,
+      supplier_id INT NOT NULL,
+      product_name VARCHAR(255) NOT NULL,
+      quantity INT NOT NULL,
+      remaining_quantity INT NOT NULL,
+      cost_price DECIMAL(10,2) DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  console.log("Database tables ready");
+}
+
+initTables().catch((err) => {
+  console.error("Table initialization failed:", err.message);
+});
+
+/* IMAGE UPLOAD */
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsPath);
+  },
+  filename: (req, file, cb) => {
+    const uniqueName =
+      Date.now() + "-" + file.originalname.replace(/\s+/g, "-");
+    cb(null, uniqueName);
   }
-};
+});
 
-const requireRole = (roles) => {
-  return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ status: "Error", message: "Access denied" });
-    }
-    next();
-  };
-};
+const upload = multer({ storage });
+
+/* TEST */
 
 app.get("/", (req, res) => {
-  res.json({ status: "Success", message: "Backend is running" });
+  res.json({ message: "Backend running successfully" });
 });
 
-// AUTH
+/* AUTH */
+
+app.post("/signup", async (req, res) => {
+  try {
+    const { name, email, password, role } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Name, email, and password are required"
+      });
+    }
+
+    const [existing] = await pool.query(
+      "SELECT id FROM users WHERE email = ?",
+      [email]
+    );
+
+    if (existing.length > 0) {
+      return res.status(409).json({
+        status: "Error",
+        message: "Email already registered"
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const [result] = await pool.query(
+      "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
+      [name, email, hashedPassword, role || "customer"]
+    );
+
+    res.json({
+      status: "Success",
+      message: "Signup successful",
+      user: {
+        id: result.insertId,
+        name,
+        email,
+        role: role || "customer"
+      }
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: "Error",
+      message: "Signup failed",
+      error: err.message
+    });
+  }
+});
 
 app.post("/register", async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
 
-    if (!name || !email || !password || !role) {
-      return res.json({ status: "Error", message: "All fields are required" });
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Name, email, and password are required"
+      });
     }
 
-    const [existing] = await pool.query("SELECT id FROM users WHERE email = ?", [
-      email,
-    ]);
+    const [existing] = await pool.query(
+      "SELECT id FROM users WHERE email = ?",
+      [email]
+    );
 
     if (existing.length > 0) {
-      return res.json({ status: "Error", message: "Email already exists" });
+      return res.status(409).json({
+        status: "Error",
+        message: "Email already registered"
+      });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    await pool.query(
+    const [result] = await pool.query(
       "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
-      [name, email, hashedPassword, role]
+      [name, email, hashedPassword, role || "customer"]
     );
 
-    res.json({ status: "Success", message: "Account created" });
+    res.json({
+      status: "Success",
+      message: "Registration successful",
+      user: {
+        id: result.insertId,
+        name,
+        email,
+        role: role || "customer"
+      }
+    });
   } catch (err) {
-    res.status(500).json({ status: "Error", message: err.sqlMessage || "Register failed" });
+    res.status(500).json({
+      status: "Error",
+      message: "Registration failed",
+      error: err.message
+    });
   }
 });
 
@@ -89,32 +253,51 @@ app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const [users] = await pool.query("SELECT * FROM users WHERE email = ?", [
-      email,
-    ]);
+    if (!email || !password) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Email and password are required"
+      });
+    }
+
+    const [users] = await pool.query(
+      "SELECT * FROM users WHERE email = ?",
+      [email]
+    );
 
     if (users.length === 0) {
-      return res.json({ status: "Error", message: "Invalid email" });
+      return res.status(401).json({
+        status: "Error",
+        message: "Invalid email or password"
+      });
     }
 
     const user = users[0];
-    const ok = await bcrypt.compare(password, user.password);
+    const passwordMatches = await bcrypt.compare(password, user.password);
 
-    if (!ok) {
-      return res.json({ status: "Error", message: "Invalid password" });
+    if (!passwordMatches) {
+      return res.status(401).json({
+        status: "Error",
+        message: "Invalid email or password"
+      });
     }
 
     res.json({
       status: "Success",
+      message: "Login successful",
       user: {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,
-      },
+        role: user.role
+      }
     });
   } catch (err) {
-    res.status(500).json({ status: "Error", message: "Login failed" });
+    res.status(500).json({
+      status: "Error",
+      message: "Login failed",
+      error: err.message
+    });
   }
 });
 
@@ -123,652 +306,692 @@ app.post("/forgot-password", async (req, res) => {
     const { email, newPassword } = req.body;
 
     if (!email || !newPassword) {
-      return res.json({ status: "Error", message: "Email and password required" });
+      return res.status(400).json({
+        status: "Error",
+        message: "Email and new password are required"
+      });
     }
 
-    const hashed = await bcrypt.hash(newPassword, 10);
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        status: "Error",
+        message: "Password must be at least 6 characters"
+      });
+    }
 
-    await pool.query("UPDATE users SET password = ? WHERE email = ?", [
-      hashed,
-      email,
-    ]);
+    const [users] = await pool.query(
+      "SELECT * FROM users WHERE email = ?",
+      [email]
+    );
 
-    res.json({ status: "Success", message: "Password updated" });
-  } catch (err) {
-    res.status(500).json({ status: "Error", message: "Failed to reset password" });
-  }
-});
+    if (users.length === 0) {
+      return res.status(404).json({
+        status: "Error",
+        message: "Email not found in system"
+      });
+    }
 
-app.put("/user/name", verifyUser, async (req, res) => {
-  try {
-    const { name } = req.body;
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    await pool.query("UPDATE users SET name = ? WHERE id = ?", [
-      name,
-      req.user.id,
-    ]);
+    await pool.query(
+      "UPDATE users SET password = ? WHERE email = ?",
+      [hashedPassword, email]
+    );
 
     res.json({
       status: "Success",
-      message: "Name updated",
-      user: {
-        id: req.user.id,
-        name,
-        email: req.user.email,
-        role: req.user.role,
-      },
+      message: "Password updated successfully"
     });
-  } catch (err) {
-    res.status(500).json({ status: "Error", message: "Failed to update name" });
-  }
-});
-
-// CUSTOMER MARKETPLACE
-
-app.get("/products", verifyUser, async (req, res) => {
-  try {
-    const [products] = await pool.query(`
-      SELECT 
-        products.*,
-        users.name AS shopkeeper_name,
-        users.email AS shopkeeper_email
-      FROM products
-      JOIN users ON products.shopkeeper_id = users.id
-      WHERE products.status = 'active'
-      ORDER BY products.id DESC
-    `);
-
-    res.json({ status: "Success", products });
   } catch (err) {
     res.status(500).json({
       status: "Error",
-      message: err.sqlMessage || "Failed to load products",
-      products: [],
+      message: "Password reset failed",
+      error: err.message
     });
   }
 });
 
-// SUPPLIERS
+/* USERS */
 
-app.post(
-  "/shopkeeper/suppliers",
-  verifyUser,
-  requireRole(["shopkeeper"]),
-  async (req, res) => {
-    try {
-      const { name, phone, email, address } = req.body;
-
-      await pool.query(
-        "INSERT INTO suppliers (shopkeeper_id, name, phone, email, address) VALUES (?, ?, ?, ?, ?)",
-        [req.user.id, name, phone || "", email || "", address || ""]
-      );
-
-      res.json({ status: "Success", message: "Supplier added" });
-    } catch (err) {
-      res.status(500).json({ status: "Error", message: err.sqlMessage || "Failed to add supplier" });
-    }
-  }
-);
-
-app.get(
-  "/shopkeeper/suppliers",
-  verifyUser,
-  requireRole(["shopkeeper"]),
-  async (req, res) => {
-    try {
-      const [suppliers] = await pool.query(
-        "SELECT * FROM suppliers WHERE shopkeeper_id = ? ORDER BY id DESC",
-        [req.user.id]
-      );
-
-      res.json({ status: "Success", suppliers });
-    } catch (err) {
-      res.status(500).json({ status: "Error", suppliers: [] });
-    }
-  }
-);
-
-app.put(
-  "/shopkeeper/suppliers/:id",
-  verifyUser,
-  requireRole(["shopkeeper"]),
-  async (req, res) => {
-    try {
-      const { name, phone, email, address } = req.body;
-
-      await pool.query(
-        "UPDATE suppliers SET name = ?, phone = ?, email = ?, address = ? WHERE id = ? AND shopkeeper_id = ?",
-        [name, phone || "", email || "", address || "", req.params.id, req.user.id]
-      );
-
-      res.json({ status: "Success", message: "Supplier updated" });
-    } catch (err) {
-      res.status(500).json({ status: "Error", message: "Failed to update supplier" });
-    }
-  }
-);
-
-app.delete(
-  "/shopkeeper/suppliers/:id",
-  verifyUser,
-  requireRole(["shopkeeper"]),
-  async (req, res) => {
-    try {
-      await pool.query(
-        "DELETE FROM suppliers WHERE id = ? AND shopkeeper_id = ?",
-        [req.params.id, req.user.id]
-      );
-
-      res.json({ status: "Success", message: "Supplier deleted" });
-    } catch (err) {
-      res.status(500).json({ status: "Error", message: "Failed to delete supplier" });
-    }
-  }
-);
-
-// STOCK
-
-app.post(
-  "/shopkeeper/receive-stock",
-  verifyUser,
-  requireRole(["shopkeeper"]),
-  async (req, res) => {
-    try {
-      const { supplier_id, product_name, quantity, remaining_quantity, cost_price } =
-        req.body;
-
-      await pool.query(
-        `INSERT INTO supplier_stock 
-        (shopkeeper_id, supplier_id, product_name, quantity, remaining_quantity, cost_price) 
-        VALUES (?, ?, ?, ?, ?, ?)`,
-        [
-          req.user.id,
-          supplier_id,
-          product_name,
-          Number(quantity || 0),
-          Number(remaining_quantity || quantity || 0),
-          Number(cost_price || 0),
-        ]
-      );
-
-      res.json({ status: "Success", message: "Stock received" });
-    } catch (err) {
-      res.status(500).json({ status: "Error", message: err.sqlMessage || "Failed to receive stock" });
-    }
-  }
-);
-
-app.get(
-  "/shopkeeper/received-stock",
-  verifyUser,
-  requireRole(["shopkeeper"]),
-  async (req, res) => {
-    try {
-      const [stock] = await pool.query(
-        `
-        SELECT supplier_stock.*, suppliers.name AS supplier_name
-        FROM supplier_stock
-        LEFT JOIN suppliers ON supplier_stock.supplier_id = suppliers.id
-        WHERE supplier_stock.shopkeeper_id = ?
-        ORDER BY supplier_stock.id DESC
-        `,
-        [req.user.id]
-      );
-
-      res.json({ status: "Success", stock });
-    } catch (err) {
-      res.status(500).json({ status: "Error", stock: [] });
-    }
-  }
-);
-
-app.put(
-  "/shopkeeper/received-stock/:id",
-  verifyUser,
-  requireRole(["shopkeeper"]),
-  async (req, res) => {
-    try {
-      const { supplier_id, product_name, quantity, remaining_quantity, cost_price } =
-        req.body;
-
-      await pool.query(
-        `UPDATE supplier_stock
-         SET supplier_id = ?, product_name = ?, quantity = ?, remaining_quantity = ?, cost_price = ?
-         WHERE id = ? AND shopkeeper_id = ?`,
-        [
-          supplier_id,
-          product_name,
-          Number(quantity || 0),
-          Number(remaining_quantity || 0),
-          Number(cost_price || 0),
-          req.params.id,
-          req.user.id,
-        ]
-      );
-
-      res.json({ status: "Success", message: "Stock updated" });
-    } catch (err) {
-      res.status(500).json({ status: "Error", message: "Failed to update stock" });
-    }
-  }
-);
-
-app.delete(
-  "/shopkeeper/received-stock/:id",
-  verifyUser,
-  requireRole(["shopkeeper"]),
-  async (req, res) => {
-    try {
-      await pool.query(
-        "DELETE FROM supplier_stock WHERE id = ? AND shopkeeper_id = ?",
-        [req.params.id, req.user.id]
-      );
-
-      res.json({ status: "Success", message: "Stock deleted" });
-    } catch (err) {
-      res.status(500).json({ status: "Error", message: "Failed to delete stock" });
-    }
-  }
-);
-
-// PRODUCTS
-
-app.post(
-  "/shopkeeper/products",
-  verifyUser,
-  requireRole(["shopkeeper"]),
-  async (req, res) => {
-    try {
-      const { title, description, price, quantity, unit, type, supplier_id } =
-        req.body;
-
-      await pool.query(
-        `INSERT INTO products 
-        (shopkeeper_id, supplier_id, title, description, price, quantity, unit, type, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          req.user.id,
-          supplier_id || null,
-          title,
-          description,
-          Number(price || 0),
-          Number(quantity || 0),
-          unit || "number",
-          type || "product",
-          "active",
-        ]
-      );
-
-      res.json({ status: "Success", message: "Product added" });
-    } catch (err) {
-      res.status(500).json({ status: "Error", message: err.sqlMessage || "Failed to add product" });
-    }
-  }
-);
-
-app.get(
-  "/shopkeeper/products",
-  verifyUser,
-  requireRole(["shopkeeper"]),
-  async (req, res) => {
-    try {
-      const [products] = await pool.query(
-        `
-        SELECT products.*, suppliers.name AS supplier_name
-        FROM products
-        LEFT JOIN suppliers ON products.supplier_id = suppliers.id
-        WHERE products.shopkeeper_id = ?
-        ORDER BY products.id DESC
-        `,
-        [req.user.id]
-      );
-
-      res.json({ status: "Success", products });
-    } catch (err) {
-      res.status(500).json({ status: "Error", products: [] });
-    }
-  }
-);
-
-app.put(
-  "/shopkeeper/products/:id",
-  verifyUser,
-  requireRole(["shopkeeper"]),
-  async (req, res) => {
-    try {
-      const { title, description, price, quantity, unit, type, supplier_id, status } =
-        req.body;
-
-      await pool.query(
-        `UPDATE products 
-         SET supplier_id = ?, title = ?, description = ?, price = ?, quantity = ?, unit = ?, type = ?, status = ?
-         WHERE id = ? AND shopkeeper_id = ?`,
-        [
-          supplier_id || null,
-          title,
-          description,
-          Number(price || 0),
-          Number(quantity || 0),
-          unit || "number",
-          type || "product",
-          status || "active",
-          req.params.id,
-          req.user.id,
-        ]
-      );
-
-      res.json({ status: "Success", message: "Product updated" });
-    } catch (err) {
-      res.status(500).json({ status: "Error", message: err.sqlMessage || "Failed to update product" });
-    }
-  }
-);
-
-app.delete(
-  "/shopkeeper/products/:id",
-  verifyUser,
-  requireRole(["shopkeeper"]),
-  async (req, res) => {
-    try {
-      await pool.query(
-        "DELETE FROM products WHERE id = ? AND shopkeeper_id = ?",
-        [req.params.id, req.user.id]
-      );
-
-      res.json({ status: "Success", message: "Product deleted" });
-    } catch (err) {
-      res.status(500).json({ status: "Error", message: "Failed to delete product" });
-    }
-  }
-);
-
-// CUSTOMER BUY
-
-app.post(
-  "/orders/:productId",
-  verifyUser,
-  requireRole(["customer"]),
-  async (req, res) => {
-    const connection = await pool.getConnection();
-
-    try {
-      const quantity = Number(req.body.quantity || 1);
-
-      await connection.beginTransaction();
-
-      const [products] = await connection.query(
-        "SELECT * FROM products WHERE id = ? AND status = 'active' FOR UPDATE",
-        [req.params.productId]
-      );
-
-      if (products.length === 0) {
-        await connection.rollback();
-        return res.json({ status: "Error", message: "Product not found" });
-      }
-
-      const product = products[0];
-
-      if (product.type === "product" && Number(product.quantity) < quantity) {
-        await connection.rollback();
-        return res.json({ status: "Error", message: "Not enough stock" });
-      }
-
-      const totalAmount = Number(product.price) * quantity;
-
-      await connection.query(
-        `INSERT INTO orders 
-        (customer_id, product_id, shopkeeper_id, quantity, total_amount, status) 
-        VALUES (?, ?, ?, ?, ?, ?)`,
-        [
-          req.user.id,
-          product.id,
-          product.shopkeeper_id,
-          quantity,
-          totalAmount,
-          "pending",
-        ]
-      );
-
-      if (product.type === "product") {
-        await connection.query(
-          "UPDATE products SET quantity = quantity - ? WHERE id = ?",
-          [quantity, product.id]
-        );
-      }
-
-      await connection.commit();
-
-      res.json({ status: "Success", message: "Order placed" });
-    } catch (err) {
-      await connection.rollback();
-      res.status(500).json({ status: "Error", message: err.sqlMessage || "Order failed" });
-    } finally {
-      connection.release();
-    }
-  }
-);
-
-// ORDERS
-
-app.get(
-  "/customer/orders",
-  verifyUser,
-  requireRole(["customer"]),
-  async (req, res) => {
-    try {
-      const [orders] = await pool.query(
-        `
-        SELECT 
-          orders.*,
-          products.title,
-          products.price,
-          products.type,
-          products.unit,
-          shopkeeper.name AS shopkeeper_name,
-          shopkeeper.email AS shopkeeper_email
-        FROM orders
-        JOIN products ON orders.product_id = products.id
-        JOIN users AS shopkeeper ON orders.shopkeeper_id = shopkeeper.id
-        WHERE orders.customer_id = ?
-        ORDER BY orders.id DESC
-        `,
-        [req.user.id]
-      );
-
-      res.json({ status: "Success", orders });
-    } catch (err) {
-      res.status(500).json({ status: "Error", orders: [] });
-    }
-  }
-);
-
-app.get(
-  "/shopkeeper/orders",
-  verifyUser,
-  requireRole(["shopkeeper"]),
-  async (req, res) => {
-    try {
-      const [orders] = await pool.query(
-        `
-        SELECT 
-          orders.*,
-          products.title,
-          products.price,
-          products.type,
-          products.unit,
-          customer.name AS customer_name,
-          customer.email AS customer_email
-        FROM orders
-        JOIN products ON orders.product_id = products.id
-        JOIN users AS customer ON orders.customer_id = customer.id
-        WHERE orders.shopkeeper_id = ?
-        ORDER BY orders.id DESC
-        `,
-        [req.user.id]
-      );
-
-      res.json({ status: "Success", orders });
-    } catch (err) {
-      res.status(500).json({ status: "Error", orders: [] });
-    }
-  }
-);
-
-app.put(
-  "/orders/:id/status",
-  verifyUser,
-  requireRole(["shopkeeper", "admin"]),
-  async (req, res) => {
-    try {
-      const { status } = req.body;
-
-      await pool.query("UPDATE orders SET status = ? WHERE id = ?", [
-        status,
-        req.params.id,
-      ]);
-
-      res.json({ status: "Success", message: "Order updated" });
-    } catch (err) {
-      res.status(500).json({ status: "Error", message: "Failed to update order" });
-    }
-  }
-);
-
-// ADMIN
-
-app.get("/admin/users", verifyUser, requireRole(["admin"]), async (req, res) => {
+app.get("/users", async (req, res) => {
   try {
-    const [users] = await pool.query(
+    const [rows] = await pool.query(
       "SELECT id, name, email, role, created_at FROM users ORDER BY id DESC"
     );
 
-    res.json({ status: "Success", users });
+    res.json(rows);
   } catch (err) {
-    res.status(500).json({ status: "Error", users: [] });
+    res.status(500).json({
+      message: "Failed to load users",
+      error: err.message
+    });
   }
 });
 
-app.delete("/admin/users/:id", verifyUser, requireRole(["admin"]), async (req, res) => {
+app.delete("/users/:id", async (req, res) => {
   try {
     await pool.query("DELETE FROM users WHERE id = ?", [req.params.id]);
-    res.json({ status: "Success", message: "User deleted" });
+
+    res.json({ message: "User deleted successfully" });
   } catch (err) {
-    res.status(500).json({ status: "Error", message: "Failed to delete user" });
+    res.status(500).json({
+      message: "Failed to delete user",
+      error: err.message
+    });
   }
 });
 
-app.get("/admin/products", verifyUser, requireRole(["admin"]), async (req, res) => {
+/* PRODUCTS */
+
+app.get("/products", async (req, res) => {
   try {
-    const [products] = await pool.query(`
-      SELECT products.*, users.name AS shopkeeper_name
+    const [rows] = await pool.query(`
+      SELECT 
+        id,
+        shopkeeper_id,
+        supplier_id,
+        title AS name,
+        description,
+        price,
+        quantity AS stock,
+        image,
+        created_at
       FROM products
-      JOIN users ON products.shopkeeper_id = users.id
-      ORDER BY products.id DESC
+      ORDER BY id DESC
     `);
 
-    res.json({ status: "Success", products });
+    res.json(rows);
   } catch (err) {
-    res.status(500).json({ status: "Error", products: [] });
+    res.status(500).json({
+      message: "Failed to load products",
+      error: err.message
+    });
   }
 });
 
-app.delete("/admin/products/:id", verifyUser, requireRole(["admin"]), async (req, res) => {
+app.post("/products", upload.single("image"), async (req, res) => {
+  try {
+    const { name, description, price, stock, shopkeeper_id, supplier_id } =
+      req.body;
+
+    const image = req.file ? `/uploads/${req.file.filename}` : null;
+
+    if (!name || !price) {
+      return res.status(400).json({
+        message: "Product name and price are required"
+      });
+    }
+
+    await pool.query(
+      `INSERT INTO products 
+      (shopkeeper_id, supplier_id, title, description, price, quantity, image)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        shopkeeper_id || null,
+        supplier_id || null,
+        name,
+        description || "",
+        price,
+        stock || 0,
+        image
+      ]
+    );
+
+    res.json({ message: "Product added successfully" });
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to add product",
+      error: err.message
+    });
+  }
+});
+
+app.put("/products/:id", upload.single("image"), async (req, res) => {
+  try {
+    const { name, description, price, stock, supplier_id } = req.body;
+
+    const fields = [];
+    const values = [];
+
+    if (name !== undefined) {
+      fields.push("title = ?");
+      values.push(name);
+    }
+
+    if (description !== undefined) {
+      fields.push("description = ?");
+      values.push(description);
+    }
+
+    if (price !== undefined) {
+      fields.push("price = ?");
+      values.push(price);
+    }
+
+    if (stock !== undefined) {
+      fields.push("quantity = ?");
+      values.push(stock);
+    }
+
+    if (supplier_id !== undefined) {
+      fields.push("supplier_id = ?");
+      values.push(supplier_id || null);
+    }
+
+    if (req.file) {
+      fields.push("image = ?");
+      values.push(`/uploads/${req.file.filename}`);
+    }
+
+    if (fields.length === 0) {
+      return res.status(400).json({
+        message: "At least one field is required"
+      });
+    }
+
+    values.push(req.params.id);
+
+    await pool.query(
+      `UPDATE products SET ${fields.join(", ")} WHERE id = ?`,
+      values
+    );
+
+    res.json({ message: "Product updated successfully" });
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to update product",
+      error: err.message
+    });
+  }
+});
+
+app.delete("/products/:id", async (req, res) => {
   try {
     await pool.query("DELETE FROM products WHERE id = ?", [req.params.id]);
-    res.json({ status: "Success", message: "Product deleted" });
+
+    res.json({ message: "Product deleted successfully" });
   } catch (err) {
-    res.status(500).json({ status: "Error", message: "Failed to delete product" });
-  }
-});
-
-app.get("/admin/orders", verifyUser, requireRole(["admin"]), async (req, res) => {
-  try {
-    const [orders] = await pool.query(`
-      SELECT 
-        orders.*,
-        products.title,
-        products.price,
-        products.unit,
-        customer.name AS customer_name,
-        customer.email AS customer_email,
-        shopkeeper.name AS shopkeeper_name,
-        shopkeeper.email AS shopkeeper_email
-      FROM orders
-      JOIN products ON orders.product_id = products.id
-      JOIN users AS customer ON orders.customer_id = customer.id
-      JOIN users AS shopkeeper ON orders.shopkeeper_id = shopkeeper.id
-      ORDER BY orders.id DESC
-    `);
-
-    res.json({ status: "Success", orders });
-  } catch (err) {
-    res.status(500).json({ status: "Error", orders: [] });
-  }
-});
-
-app.delete("/admin/orders/:id", verifyUser, requireRole(["admin"]), async (req, res) => {
-  try {
-    await pool.query("DELETE FROM orders WHERE id = ?", [req.params.id]);
-    res.json({ status: "Success", message: "Order deleted" });
-  } catch (err) {
-    res.status(500).json({ status: "Error", message: "Failed to delete order" });
-  }
-});
-
-app.get("/admin/stats", verifyUser, requireRole(["admin"]), async (req, res) => {
-  try {
-    const [[users]] = await pool.query("SELECT COUNT(*) AS total FROM users");
-    const [[products]] = await pool.query("SELECT COUNT(*) AS total FROM products");
-    const [[orders]] = await pool.query("SELECT COUNT(*) AS total FROM orders");
-
-    res.json({
-      status: "Success",
-      stats: {
-        users: users.total,
-        products: products.total,
-        orders: orders.total,
-      },
+    res.status(500).json({
+      message: "Failed to delete product",
+      error: err.message
     });
-  } catch (err) {
-    res.status(500).json({ status: "Error", message: "Stats failed" });
   }
 });
 
-app.put(
-  "/shopkeeper/products/:id/add-inventory",
-  verifyUser,
-  requireRole(["shopkeeper"]),
-  async (req, res) => {
-    try {
-      const { addQuantity } = req.body;
+/* SUPPLIERS */
 
-      if (!addQuantity || Number(addQuantity) <= 0) {
-        return res.json({
-          status: "Error",
-          message: "Enter valid quantity",
+app.get("/suppliers", async (req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT * FROM suppliers ORDER BY id DESC");
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to load suppliers",
+      error: err.message
+    });
+  }
+});
+
+app.post("/suppliers", async (req, res) => {
+  try {
+    const { name, phone, email, address } = req.body;
+
+    if (!name) {
+      return res.status(400).json({
+        message: "Supplier name is required"
+      });
+    }
+
+    await pool.query(
+      "INSERT INTO suppliers (name, phone, email, address) VALUES (?, ?, ?, ?)",
+      [name, phone || "", email || "", address || ""]
+    );
+
+    res.json({ message: "Supplier added successfully" });
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to add supplier",
+      error: err.message
+    });
+  }
+});
+
+app.delete("/suppliers/:id", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM suppliers WHERE id = ?", [req.params.id]);
+
+    res.json({ message: "Supplier deleted successfully" });
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to delete supplier",
+      error: err.message
+    });
+  }
+});
+
+/* SUPPLIER STOCK */
+
+app.post("/supplier-stock", async (req, res) => {
+  try {
+    const { supplier_id, product_id, quantity, cost_price, shopkeeper_id } = req.body;
+
+    if (!supplier_id || !product_id || !quantity) {
+      return res.status(400).json({ message: "Supplier, product, and quantity are required" });
+    }
+
+    // Get product name from product_id
+    const [products] = await pool.query(
+      "SELECT title FROM products WHERE id = ?",
+      [product_id]
+    );
+    if (products.length === 0) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+    const product_name = products[0].title;
+
+    // Use shopkeeper_id if provided, otherwise use 1 as default
+    const shop_id = shopkeeper_id || 1;
+
+    await pool.query(
+      "INSERT INTO supplier_stock (shopkeeper_id, supplier_id, product_name, quantity, remaining_quantity, cost_price) VALUES (?, ?, ?, ?, ?, ?)",
+      [shop_id, supplier_id, product_name, quantity, quantity, cost_price || 0]
+    );
+
+    // Update product quantity
+    await pool.query(
+      "UPDATE products SET quantity = quantity + ? WHERE id = ?",
+      [quantity, product_id]
+    );
+
+    res.json({ message: "Stock received and inventory updated" });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to receive stock", error: err.message });
+  }
+});
+
+app.get("/supplier-stock", async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT
+        ss.id,
+        ss.shopkeeper_id,
+        ss.supplier_id,
+        ss.product_name,
+        ss.quantity,
+        ss.remaining_quantity,
+        ss.cost_price,
+        ss.created_at,
+        suppliers.name AS supplier_name
+      FROM supplier_stock ss
+      LEFT JOIN suppliers ON ss.supplier_id = suppliers.id
+      ORDER BY ss.created_at DESC`
+    );
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to load supplier stock", error: err.message });
+  }
+});
+
+/* CART */
+
+app.get("/cart/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const [rows] = await pool.query(
+      `SELECT 
+        cart.id AS cart_id,
+        cart.quantity,
+        products.id AS product_id,
+        products.title AS name,
+        products.description,
+        products.price,
+        products.image,
+        products.quantity AS stock
+       FROM cart
+       JOIN products ON cart.product_id = products.id
+       WHERE cart.customer_email = ?`,
+      [email]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to load cart",
+      error: err.message
+    });
+  }
+});
+
+app.post("/cart", async (req, res) => {
+  try {
+    const { customer_email, product_id, quantity } = req.body;
+    const requestedQuantity = Number(quantity) || 1;
+
+    if (!customer_email || !product_id) {
+      return res.status(400).json({
+        message: "Customer email and product ID required"
+      });
+    }
+
+    if (requestedQuantity < 1) {
+      return res.status(400).json({
+        message: "Quantity must be at least 1"
+      });
+    }
+
+    const [productRows] = await pool.query(
+      "SELECT quantity FROM products WHERE id = ?",
+      [product_id]
+    );
+
+    if (productRows.length === 0) {
+      return res.status(404).json({
+        message: "Product not found"
+      });
+    }
+
+    const stock = Number(productRows[0].quantity || 0);
+
+    if (stock < 1) {
+      return res.status(400).json({
+        message: "Product is out of stock"
+      });
+    }
+
+    const [existing] = await pool.query(
+      "SELECT * FROM cart WHERE customer_email = ? AND product_id = ?",
+      [customer_email, product_id]
+    );
+
+    const currentQuantity =
+      existing.length > 0 ? Number(existing[0].quantity || 0) : 0;
+
+    const newQuantity = currentQuantity + requestedQuantity;
+
+    if (newQuantity > stock) {
+      return res.status(400).json({
+        message: `Only ${stock} item(s) available in stock`
+      });
+    }
+
+    if (existing.length > 0) {
+      await pool.query(
+        "UPDATE cart SET quantity = ? WHERE customer_email = ? AND product_id = ?",
+        [newQuantity, customer_email, product_id]
+      );
+    } else {
+      await pool.query(
+        "INSERT INTO cart (customer_email, product_id, quantity) VALUES (?, ?, ?)",
+        [customer_email, product_id, requestedQuantity]
+      );
+    }
+
+    res.json({ message: "Product added to cart" });
+  } catch (err) {
+    console.error("ADD CART ERROR:", err);
+
+    res.status(500).json({
+      message: "Failed to add cart",
+      error: err.message
+    });
+  }
+});
+
+app.put("/cart/:cartId", async (req, res) => {
+  try {
+    const { quantity } = req.body;
+    const newQuantity = Number(quantity);
+
+    if (!newQuantity || newQuantity < 1) {
+      return res.status(400).json({
+        message: "Quantity must be at least 1"
+      });
+    }
+
+    const [cartRows] = await pool.query(
+      `SELECT 
+        cart.product_id,
+        products.quantity AS stock
+       FROM cart
+       JOIN products ON cart.product_id = products.id
+       WHERE cart.id = ?`,
+      [req.params.cartId]
+    );
+
+    if (cartRows.length === 0) {
+      return res.status(404).json({
+        message: "Cart item not found"
+      });
+    }
+
+    if (newQuantity > Number(cartRows[0].stock)) {
+      return res.status(400).json({
+        message: `Only ${cartRows[0].stock} item(s) available in stock`
+      });
+    }
+
+    await pool.query(
+      "UPDATE cart SET quantity = ? WHERE id = ?",
+      [newQuantity, req.params.cartId]
+    );
+
+    res.json({ message: "Cart updated successfully" });
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to update cart",
+      error: err.message
+    });
+  }
+});
+
+app.delete("/cart/:cartId", async (req, res) => {
+  try {
+    await pool.query("DELETE FROM cart WHERE id = ?", [req.params.cartId]);
+
+    res.json({ message: "Removed from cart" });
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to remove item",
+      error: err.message
+    });
+  }
+});
+
+/* CHECKOUT */
+
+app.post("/checkout", async (req, res) => {
+  const connection = await pool.getConnection();
+
+  try {
+    const { customer_email, customer_name, phone, address } = req.body;
+
+    if (!customer_email || !phone || !address) {
+      return res.status(400).json({
+        message: "Email, phone and address are required"
+      });
+    }
+
+    await connection.beginTransaction();
+
+    const [cartItems] = await connection.query(
+      `SELECT 
+        cart.quantity,
+        products.id AS product_id,
+        products.title AS name,
+        products.price,
+        products.quantity AS stock
+       FROM cart
+       JOIN products ON cart.product_id = products.id
+       WHERE cart.customer_email = ?`,
+      [customer_email]
+    );
+
+    if (cartItems.length === 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        message: "Cart is empty"
+      });
+    }
+
+    let total = 0;
+
+    for (const item of cartItems) {
+      if (Number(item.quantity) > Number(item.stock)) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: `${item.name} has only ${item.stock} items in stock`
         });
       }
 
-      await pool.query(
-        "UPDATE products SET quantity = quantity + ? WHERE id = ? AND shopkeeper_id = ?",
-        [Number(addQuantity), req.params.id, req.user.id]
+      total += Number(item.price) * Number(item.quantity);
+    }
+
+    const [orderResult] = await connection.query(
+      `INSERT INTO orders
+      (customer_email, customer_name, phone, address, payment_method, total_amount, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        customer_email,
+        customer_name || "",
+        phone,
+        address,
+        "Cash on Delivery",
+        total,
+        "Pending"
+      ]
+    );
+
+    const orderId = orderResult.insertId;
+
+    for (const item of cartItems) {
+      const subtotal = Number(item.price) * Number(item.quantity);
+
+      await connection.query(
+        `INSERT INTO order_items
+        (order_id, product_id, product_name, price, quantity, subtotal)
+        VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          orderId,
+          item.product_id,
+          item.name,
+          item.price,
+          item.quantity,
+          subtotal
+        ]
       );
 
-      res.json({
-        status: "Success",
-        message: "Inventory added successfully",
-      });
-    } catch (err) {
-      console.error("Add inventory error:", err);
-      res.status(500).json({
-        status: "Error",
-        message: "Failed to add inventory",
+      await connection.query(
+        "UPDATE products SET quantity = quantity - ? WHERE id = ?",
+        [item.quantity, item.product_id]
+      );
+    }
+
+    await connection.query("DELETE FROM cart WHERE customer_email = ?", [
+      customer_email
+    ]);
+
+    await connection.commit();
+
+    res.json({
+      message: "Order placed successfully",
+      order_id: orderId
+    });
+  } catch (err) {
+    await connection.rollback();
+
+    console.error("CHECKOUT ERROR:", err);
+
+    res.status(500).json({
+      message: "Checkout failed",
+      error: err.message
+    });
+  } finally {
+    connection.release();
+  }
+});
+
+/* BILLS */
+
+app.get("/bills/customer/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const [orders] = await pool.query(
+      "SELECT * FROM orders WHERE customer_email = ? ORDER BY id DESC",
+      [email]
+    );
+
+    for (const order of orders) {
+      const [items] = await pool.query(
+        "SELECT * FROM order_items WHERE order_id = ?",
+        [order.id]
+      );
+
+      order.items = items;
+    }
+
+    res.json(orders);
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to load customer bills",
+      error: err.message
+    });
+  }
+});
+
+app.get("/bills/shopkeeper", async (req, res) => {
+  try {
+    const [orders] = await pool.query("SELECT * FROM orders ORDER BY id DESC");
+
+    for (const order of orders) {
+      const [items] = await pool.query(
+        "SELECT * FROM order_items WHERE order_id = ?",
+        [order.id]
+      );
+
+      order.items = items;
+    }
+
+    res.json(orders);
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to load shopkeeper bills",
+      error: err.message
+    });
+  }
+});
+
+/* ORDER STATUS */
+
+app.put("/orders/:id/status", async (req, res) => {
+  try {
+    const { status } = req.body;
+    const allowed = ["Pending", "Accepted", "Rejected", "Completed"];
+
+    if (!allowed.includes(status)) {
+      return res.status(400).json({
+        message: "Invalid order status"
       });
     }
-  }
-);
-const PORT = process.env.PORT || 8081;
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+    await pool.query("UPDATE orders SET status = ? WHERE id = ?", [
+      status,
+      req.params.id
+    ]);
+
+    res.json({ message: `Order marked as ${status}` });
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to update order status",
+      error: err.message
+    });
+  }
+});
+
+/* START SERVER */
+app.listen(8081, "0.0.0.0", () => {
+  console.log("Server running on port 8081");
 });

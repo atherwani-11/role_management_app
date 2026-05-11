@@ -1,200 +1,512 @@
-import React, { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import API from "../api";
-import { useAuth } from "../AuthContext";
 
-const Admin = () => {
-  const { user, logout } = useAuth();
+function Admin() {
+  const navigate = useNavigate();
 
+  const authUser = JSON.parse(localStorage.getItem("user")) || {};
   const [users, setUsers] = useState([]);
   const [products, setProducts] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [stats, setStats] = useState({ users: 0, products: 0, orders: 0 });
+  const [suppliers, setSuppliers] = useState([]);
+  const [bills, setBills] = useState([]);
+  const [message, setMessage] = useState("");
+  const [profileName, setProfileName] = useState(authUser.name || "");
+  const [editUserId, setEditUserId] = useState(null);
+  const [editUserName, setEditUserName] = useState("");
+  const [editSupplierId, setEditSupplierId] = useState(null);
+  const [editSupplierForm, setEditSupplierForm] = useState({ name: "", phone: "", email: "", address: "" });
+  const [stockForm, setStockForm] = useState({ supplier_id: "", product_id: "", quantity: "", cost_price: "" });
+  const [editProductId, setEditProductId] = useState(null);
+  const [editProductForm, setEditProductForm] = useState({ name: "", description: "", price: "", stock: "" });
 
-  const headers = { email: user.email };
+  const supportEmail = "support@rolemanagement.app";
 
-  const fetchAdminData = useCallback(async () => {
-    const usersRes = await API.get("/admin/users", { headers });
-    const productsRes = await API.get("/admin/products", { headers });
-    const ordersRes = await API.get("/admin/orders", { headers });
-    const statsRes = await API.get("/admin/stats", { headers });
+  const loadAdminData = async () => {
+    try {
+      const usersRes = await API.get("/users");
+      const productsRes = await API.get("/products");
+      const suppliersRes = await API.get("/suppliers");
+      const billsRes = await API.get("/bills/shopkeeper");
 
-    setUsers(usersRes.data.users || []);
-    setProducts(productsRes.data.products || []);
-    setOrders(ordersRes.data.orders || []);
-    setStats(statsRes.data.stats || {});
-  }, [user.email]);
+      setUsers(usersRes.data);
+      setProducts(productsRes.data);
+      setSuppliers(suppliersRes.data);
+      setBills(billsRes.data);
+    } catch (err) {
+      setMessage("Failed to load admin data");
+    }
+  };
 
-  useEffect(() => {
-    fetchAdminData();
-  }, [fetchAdminData]);
+  const logout = () => {
+    localStorage.removeItem("user");
+    localStorage.removeItem("email");
+    navigate("/login");
+  };
+
+  const updateProfile = async (e) => {
+    e.preventDefault();
+
+    try {
+      const res = await API.put(`/users/${authUser.id}`, { name: profileName });
+      localStorage.setItem("user", JSON.stringify({ ...authUser, name: profileName }));
+      setUsers((prev) => prev.map((u) => (u.id === authUser.id ? res.data.user : u)));
+      setMessage("Admin name updated successfully");
+    } catch (err) {
+      setMessage(err.response?.data?.message || "Failed to update name");
+    }
+  };
 
   const deleteUser = async (id) => {
-    if (!window.confirm("Delete this user?")) return;
-    await API.delete(`/admin/users/${id}`, { headers });
-    fetchAdminData();
+    try {
+      await API.delete(`/users/${id}`);
+      setMessage("User deleted successfully");
+      loadAdminData();
+    } catch (err) {
+      setMessage(err.response?.data?.message || "Failed to delete user");
+    }
+  };
+
+  const editCustomerName = async (e) => {
+    e.preventDefault();
+    try {
+      await API.put(`/users/${editUserId}`, { name: editUserName });
+      setUsers((prev) => prev.map((u) => (u.id === editUserId ? { ...u, name: editUserName } : u)));
+      setMessage("Customer name updated successfully");
+      setEditUserId(null);
+      setEditUserName("");
+    } catch (err) {
+      setMessage(err.response?.data?.message || "Failed to update customer name");
+    }
+  };
+
+  const editSupplier = (supplier) => {
+    setEditSupplierId(supplier.id);
+    setEditSupplierForm({
+      name: supplier.name || "",
+      phone: supplier.phone || "",
+      email: supplier.email || "",
+      address: supplier.address || ""
+    });
+  };
+
+  const updateSupplier = async (e) => {
+    e.preventDefault();
+    try {
+      await API.put(`/suppliers/${editSupplierId}`, editSupplierForm);
+      setMessage("Supplier updated successfully");
+      setEditSupplierId(null);
+      setEditSupplierForm({ name: "", phone: "", email: "", address: "" });
+      loadAdminData();
+    } catch (err) {
+      setMessage(err.response?.data?.message || "Failed to update supplier");
+    }
+  };
+
+  const deleteSupplier = async (id) => {
+    try {
+      await API.delete(`/suppliers/${id}`);
+      setMessage("Supplier deleted successfully");
+      loadAdminData();
+    } catch (err) {
+      setMessage(err.response?.data?.message || "Failed to delete supplier");
+    }
+  };
+
+  const receiveStock = async (e) => {
+    e.preventDefault();
+
+    try {
+      await API.post("/supplier-stock", stockForm);
+      setMessage("Stock received successfully.");
+      setStockForm({ supplier_id: "", product_id: "", quantity: "", cost_price: "" });
+      loadAdminData();
+    } catch (err) {
+      setMessage(err.response?.data?.message || err.response?.data?.error || "Failed to receive stock");
+    }
+  };
+
+  const editProduct = (product) => {
+    setEditProductId(product.id);
+    setEditProductForm({
+      name: product.name || "",
+      description: product.description || "",
+      price: product.price || "",
+      stock: product.stock || ""
+    });
+  };
+
+  const updateProduct = async (e) => {
+    e.preventDefault();
+    try {
+      await API.put(`/products/${editProductId}`, editProductForm);
+      setMessage("Product updated successfully");
+      setEditProductId(null);
+      setEditProductForm({ name: "", description: "", price: "", stock: "" });
+      loadAdminData();
+    } catch (err) {
+      setMessage(err.response?.data?.message || "Failed to update product");
+    }
   };
 
   const deleteProduct = async (id) => {
-    if (!window.confirm("Delete this product?")) return;
-    await API.delete(`/admin/products/${id}`, { headers });
-    fetchAdminData();
+    try {
+      await API.delete(`/products/${id}`);
+      setMessage("Product deleted successfully");
+      loadAdminData();
+    } catch (err) {
+      setMessage(err.response?.data?.message || "Failed to delete product");
+    }
   };
 
-  const deleteOrder = async (id) => {
-    if (!window.confirm("Delete this order?")) return;
-    await API.delete(`/admin/orders/${id}`, { headers });
-    fetchAdminData();
-  };
+  useEffect(() => {
+    loadAdminData();
+  }, []);
 
-  const updateOrderStatus = async (id, status) => {
-    await API.put(`/orders/${id}/status`, { status }, { headers });
-    fetchAdminData();
-  };
+  const totalSales = bills.reduce(
+    (sum, bill) => sum + Number(bill.total_amount || 0),
+    0
+  );
+
+  const totalInventory = products.reduce(
+    (sum, product) => sum + Number(product.stock || 0),
+    0
+  );
+
+  const completedOrders = bills.filter(
+    (bill) => bill.status?.toLowerCase() === "completed"
+  ).length;
 
   return (
-    <div className="layout">
-      <aside className="sidebar">
+    <div className="page">
+      <div className="topbar">
         <div>
-          <h2>Admin</h2>
-          <p>{user.name}</p>
-          <p>{user.email}</p>
-          <p>Contact: admin@marketplace.com</p>
-          <p>Phone: +91 9876543210</p>
-        </div>
-
-        <button className="logout-btn" onClick={logout}>
-          Logout
-        </button>
-      </aside>
-
-      <main className="main">
-        <div className="top-card">
           <h1>Admin Dashboard</h1>
-          <p>Manage users, products, orders and platform data</p>
+          <p>Manage users, products, orders, and support from one place.</p>
         </div>
 
-        <div className="stats">
-          <div className="stat-card">
-            <span>Users</span>
-            <h2>{stats.users}</h2>
-          </div>
+        <div className="action-row">
+          <Link to="/shopkeeper-bills" className="btn secondary">
+            View All Orders
+          </Link>
+          <button onClick={logout} className="danger">
+            Logout
+          </button>
+        </div>
+      </div>
 
-          <div className="stat-card">
-            <span>Products</span>
-            <h2>{stats.products}</h2>
-          </div>
+      {message && <p className="message">{message}</p>}
+      <form onSubmit={updateProfile} className="form">
+        <h2>Edit Admin Name</h2>
+        <input
+          type="text"
+          placeholder="Admin Name"
+          required
+          value={profileName}
+          onChange={(e) => setProfileName(e.target.value)}
+        />
+        <button className="btn" type="submit">Save Admin Name</button>
+      </form>
 
-          <div className="stat-card">
-            <span>Orders</span>
-            <h2>{stats.orders}</h2>
-          </div>
+      <div className="stats-grid">
+        <div className="card highlight">
+          <h2>{users.length}</h2>
+          <p>Total Users</p>
         </div>
 
-        <h2 className="section-title">Manage Users</h2>
+        <div className="card highlight">
+          <h2>{products.length}</h2>
+          <p>Total Products</p>
+        </div>
 
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Role</th>
-              <th>Action</th>
-            </tr>
-          </thead>
+        <div className="card highlight">
+          <h2>{totalInventory}</h2>
+          <p>Total Inventory</p>
+        </div>
 
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.id}>
-                <td>{u.name}</td>
-                <td>{u.email}</td>
-                <td>{u.role}</td>
-                <td>
-                  <button className="danger-btn" onClick={() => deleteUser(u.id)}>
+        <div className="card highlight">
+          <h2>{bills.length}</h2>
+          <p>Total Orders</p>
+        </div>
+
+        <div className="card highlight">
+          <h2>{completedOrders}</h2>
+          <p>Completed Orders</p>
+        </div>
+
+        <div className="card highlight">
+          <h2>₹{totalSales}</h2>
+          <p>Total Sales</p>
+        </div>
+      </div>
+
+      <div className="stats-grid">
+        <div className="card contact-card">
+          <h2>Support</h2>
+          <p>Admin helps maintain system health, manage users, and resolve issues.</p>
+          <p>
+            <strong>Email:</strong> {supportEmail}
+          </p>
+          <p>
+            <strong>Purpose:</strong> oversee inventory, approve orders, and support customers/shopkeepers.
+          </p>
+        </div>
+
+        <div className="card">
+          <h2>Contact Info</h2>
+          {users.length === 0 ? (
+            <p>No users found.</p>
+          ) : (
+            users.slice(0, 5).map((user) => (
+              <p key={user.id}>
+                <strong>{user.name}</strong> <span className="small-tag">{user.role}</span>
+                <br />
+                {user.email}
+              </p>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="stats-grid">
+        <div className="card">
+          <h2>Supplier Management</h2>
+          {suppliers.length === 0 ? (
+            <p>No suppliers found.</p>
+          ) : (
+            suppliers.map((supplier) => (
+              <div key={supplier.id} className="bill">
+                <p><strong>{supplier.name}</strong> — {supplier.email || "-"}</p>
+                <p>{supplier.phone || "-"}</p>
+                <p>{supplier.address || "-"}</p>
+                <div className="action-row">
+                  <button className="btn secondary" onClick={() => editSupplier(supplier)}>
+                    Edit
+                  </button>
+                  <button className="btn danger" onClick={() => deleteSupplier(supplier.id)}>
                     Delete
                   </button>
-                </td>
-              </tr>
+                </div>
+              </div>
+            ))
+          )}
+
+          {editSupplierId && (
+            <form onSubmit={updateSupplier} className="form">
+              <h2>Edit Supplier</h2>
+              <input
+                type="text"
+                placeholder="Supplier Name"
+                required
+                value={editSupplierForm.name}
+                onChange={(e) => setEditSupplierForm({ ...editSupplierForm, name: e.target.value })}
+              />
+              <input
+                type="text"
+                placeholder="Phone"
+                value={editSupplierForm.phone}
+                onChange={(e) => setEditSupplierForm({ ...editSupplierForm, phone: e.target.value })}
+              />
+              <input
+                type="email"
+                placeholder="Email"
+                value={editSupplierForm.email}
+                onChange={(e) => setEditSupplierForm({ ...editSupplierForm, email: e.target.value })}
+              />
+              <textarea
+                placeholder="Address"
+                value={editSupplierForm.address}
+                onChange={(e) => setEditSupplierForm({ ...editSupplierForm, address: e.target.value })}
+              />
+              <button className="btn" type="submit">Save Supplier</button>
+            </form>
+          )}
+        </div>
+
+        <div className="card">
+          <h2>Receive Stock from Supplier</h2>
+          <form onSubmit={receiveStock} className="form">
+            <select
+              required
+              value={stockForm.supplier_id}
+              onChange={(e) => setStockForm({ ...stockForm, supplier_id: e.target.value })}
+            >
+              <option value="">Select Supplier</option>
+              {suppliers.map((supplier) => (
+                <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
+              ))}
+            </select>
+
+            <select
+              required
+              value={stockForm.product_id}
+              onChange={(e) => setStockForm({ ...stockForm, product_id: e.target.value })}
+            >
+              <option value="">Select Product</option>
+              {products.map((product) => (
+                <option key={product.id} value={product.id}>{product.name}</option>
+              ))}
+            </select>
+
+            <input
+              type="number"
+              placeholder="Quantity Received"
+              required
+              value={stockForm.quantity}
+              onChange={(e) => setStockForm({ ...stockForm, quantity: e.target.value })}
+            />
+
+            <input
+              type="number"
+              placeholder="Cost Price"
+              value={stockForm.cost_price}
+              onChange={(e) => setStockForm({ ...stockForm, cost_price: e.target.value })}
+            />
+
+            <button className="btn" type="submit">Receive Stock</button>
+          </form>
+        </div>
+
+        <div className="card">
+          <h2>Manage Customers</h2>
+          {users.filter((user) => user.role === "customer").length === 0 ? (
+            <p>No customers found.</p>
+          ) : (
+            users
+              .filter((user) => user.role === "customer")
+              .map((customer) => (
+                <div key={customer.id} className="bill">
+                  <p><strong>{customer.name}</strong> — {customer.email}</p>
+                  <div className="action-row">
+                    <button
+                      className="btn secondary"
+                      onClick={() => {
+                        setEditUserId(customer.id);
+                        setEditUserName(customer.name);
+                      }}
+                    >
+                      Edit Name
+                    </button>
+                    <button className="btn danger" onClick={() => deleteUser(customer.id)}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))
+          )}
+        </div>
+      </div>
+
+      {editUserId && (
+        <form onSubmit={editCustomerName} className="form">
+          <h2>Update Customer Name</h2>
+          <input
+            type="text"
+            required
+            value={editUserName}
+            onChange={(e) => setEditUserName(e.target.value)}
+          />
+          <button className="btn" type="submit">Save Customer Name</button>
+        </form>
+      )}
+
+      <h2>Manage Products</h2>
+      <div className="grid">
+        {products.map((product) => (
+          <div className="card" key={product.id}>
+            {product.image && (
+              <img
+                src={`${API.defaults.baseURL}${product.image}`}
+                alt={product.name}
+                className="product-img"
+                style={{ width: "100%", height: "180px", objectFit: "cover", borderRadius: "12px", marginBottom: "12px" }}
+              />
+            )}
+            <h3>{product.name}</h3>
+            <p>{product.description}</p>
+            <p><strong>Price:</strong> ₹{product.price}</p>
+            <p><strong>Stock:</strong> {product.stock}</p>
+            <div className="action-row">
+              <button className="btn secondary" onClick={() => editProduct(product)}>
+                Edit
+              </button>
+              <button className="btn danger" onClick={() => deleteProduct(product.id)}>
+                Delete
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {editProductId && (
+        <form onSubmit={updateProduct} className="form">
+          <h2>Edit Product</h2>
+          <input
+            type="text"
+            placeholder="Name"
+            required
+            value={editProductForm.name}
+            onChange={(e) => setEditProductForm({ ...editProductForm, name: e.target.value })}
+          />
+          <textarea
+            placeholder="Description"
+            value={editProductForm.description}
+            onChange={(e) => setEditProductForm({ ...editProductForm, description: e.target.value })}
+          />
+          <input
+            type="number"
+            placeholder="Price"
+            required
+            value={editProductForm.price}
+            onChange={(e) => setEditProductForm({ ...editProductForm, price: e.target.value })}
+          />
+          <input
+            type="number"
+            placeholder="Stock"
+            value={editProductForm.stock}
+            onChange={(e) => setEditProductForm({ ...editProductForm, stock: e.target.value })}
+          />
+          <button className="btn" type="submit">Save Product</button>
+        </form>
+      )}
+
+      <h2>Recent Orders</h2>
+
+      {bills.length === 0 ? (
+        <p>No orders found.</p>
+      ) : (
+        bills.map((bill) => (
+          <div className="bill" key={bill.id}>
+            <h3>Bill #{bill.id}</h3>
+            <p>
+              <strong>Customer:</strong> {bill.customer_name || bill.customer_email}
+            </p>
+            <p>
+              <strong>Email:</strong> {bill.customer_email}
+            </p>
+            <p>
+              <strong>Total:</strong> ₹{bill.total_amount}
+            </p>
+            <p>
+              <strong>Status:</strong> {bill.status}
+            </p>
+            <p>
+              <strong>Payment:</strong> {bill.payment_method}
+            </p>
+            <p>
+              <strong>Address:</strong> {bill.address}
+            </p>
+            <h4>Items</h4>
+            {bill.items.map((item) => (
+              <p key={item.id}>
+                {item.product_name} × {item.quantity} = ₹{item.subtotal}
+              </p>
             ))}
-          </tbody>
-        </table>
-
-        <h2 className="section-title">Manage Products</h2>
-
-        <table>
-          <thead>
-            <tr>
-              <th>Product</th>
-              <th>Shopkeeper</th>
-              <th>Price</th>
-              <th>Stock</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {products.map((p) => (
-              <tr key={p.id}>
-                <td>{p.title}</td>
-                <td>{p.shopkeeper_name}</td>
-                <td>₹{Number(p.price).toFixed(2)}</td>
-                <td>
-                  {p.quantity} {p.unit}
-                </td>
-                <td>
-                  <button className="danger-btn" onClick={() => deleteProduct(p.id)}>
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <h2 className="section-title">Manage Orders</h2>
-
-        <table>
-          <thead>
-            <tr>
-              <th>Bill ID</th>
-              <th>Customer</th>
-              <th>Shopkeeper</th>
-              <th>Product</th>
-              <th>Total</th>
-              <th>Status</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {orders.map((o) => (
-              <tr key={o.id}>
-                <td>INV-{o.id}</td>
-                <td>{o.customer_name}</td>
-                <td>{o.shopkeeper_name}</td>
-                <td>{o.title}</td>
-                <td>₹{Number(o.total_amount || 0).toFixed(2)}</td>
-                <td>{o.status}</td>
-                <td>
-                  <button onClick={() => updateOrderStatus(o.id, "accepted")}>
-                    Accept
-                  </button>
-                  <button onClick={() => updateOrderStatus(o.id, "completed")}>
-                    Complete
-                  </button>
-                  <button onClick={() => updateOrderStatus(o.id, "rejected")}>
-                    Reject
-                  </button>
-                  <button className="danger-btn" onClick={() => deleteOrder(o.id)}>
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </main>
+          </div>
+        ))
+      )}
     </div>
   );
-};
+}
 
 export default Admin;

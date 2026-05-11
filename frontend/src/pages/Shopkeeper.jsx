@@ -1,799 +1,449 @@
-import React, { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import API from "../api";
-import { useAuth } from "../AuthContext";
+import { Link, useNavigate } from "react-router-dom";
 
-const Shopkeeper = () => {
-  const { user, logout } = useAuth();
+function Shopkeeper() {
+  const navigate = useNavigate();
+  const user = JSON.parse(localStorage.getItem("user")) || {};
 
-  const [items, setItems] = useState([]);
-  const [orders, setOrders] = useState([]);
+  const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
-  const [receivedStock, setReceivedStock] = useState([]);
-  const [error, setError] = useState("");
+  const [orders, setOrders] = useState([]);
+  const [supplierStock, setSupplierStock] = useState([]);
+  const [message, setMessage] = useState("");
+  const [editProductId, setEditProductId] = useState(null);
+  const [profileName, setProfileName] = useState(user.name || "");
 
-  const [editingSupplierId, setEditingSupplierId] = useState(null);
-  const [editingStockId, setEditingStockId] = useState(null);
-  const [billingSearch, setBillingSearch] = useState("");
+  const [productForm, setProductForm] = useState({
+    name: "",
+    description: "",
+    price: "",
+    stock: "",
+    image: null
+  });
 
   const [supplierForm, setSupplierForm] = useState({
     name: "",
     phone: "",
     email: "",
-    address: "",
+    address: ""
   });
 
   const [stockForm, setStockForm] = useState({
     supplier_id: "",
-    product_name: "",
-    quantity: "",
-    remaining_quantity: "",
-    cost_price: "",
-  });
-
-  const [productForm, setProductForm] = useState({
-    title: "",
-    description: "",
-    price: "",
-    quantity: "",
-    unit: "number",
-    type: "product",
-    supplier_id: "",
-  });
-
-  const [inventoryForm, setInventoryForm] = useState({
     product_id: "",
-    addQuantity: "",
+    quantity: "",
+    cost_price: ""
   });
 
-  const headers = { email: user.email };
-
-  const fetchAll = useCallback(async () => {
+  const loadProducts = async () => {
     try {
-      const [productsRes, ordersRes, suppliersRes, stockRes] =
-        await Promise.all([
-          API.get("/shopkeeper/products", { headers }),
-          API.get("/shopkeeper/orders", { headers }),
-          API.get("/shopkeeper/suppliers", { headers }),
-          API.get("/shopkeeper/received-stock", { headers }),
-        ]);
-
-      setItems(productsRes.data.products || []);
-      setOrders(ordersRes.data.orders || []);
-      setSuppliers(suppliersRes.data.suppliers || []);
-      setReceivedStock(stockRes.data.stock || []);
-      setError("");
+      const res = await API.get("/products");
+      setProducts(res.data);
     } catch (err) {
-      console.error(err);
-      setError("Failed to load shopkeeper data");
+      setMessage("Failed to load products");
     }
-  }, [user.email]);
-
-  useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
-
-  const handleSupplierChange = (e) => {
-    setSupplierForm({ ...supplierForm, [e.target.name]: e.target.value });
   };
 
-  const handleStockChange = (e) => {
-    setStockForm({ ...stockForm, [e.target.name]: e.target.value });
+  const loadSuppliers = async () => {
+    try {
+      const res = await API.get("/suppliers");
+      setSuppliers(res.data);
+    } catch (err) {
+      setMessage("Failed to load suppliers");
+    }
   };
 
-  const handleProductChange = (e) => {
-    setProductForm({ ...productForm, [e.target.name]: e.target.value });
+  const loadOrders = async () => {
+    try {
+      const res = await API.get("/bills/shopkeeper");
+      setOrders(res.data);
+    } catch (err) {
+      setMessage("Failed to load orders");
+    }
   };
 
-  const handleInventoryChange = (e) => {
-    setInventoryForm({
-      ...inventoryForm,
-      [e.target.name]: e.target.value,
+  const loadSupplierStock = async () => {
+    try {
+      const res = await API.get("/supplier-stock");
+      setSupplierStock(res.data);
+    } catch (err) {
+      // silent fail, products and suppliers still show
+    }
+  };
+
+  const saveProduct = async (e) => {
+    e.preventDefault();
+
+    try {
+      const data = new FormData();
+      data.append("name", productForm.name);
+      data.append("description", productForm.description);
+      data.append("price", productForm.price);
+      data.append("stock", productForm.stock);
+      data.append("shopkeeper_id", user.id);
+      if (productForm.image) data.append("image", productForm.image);
+
+      if (editProductId) {
+        await API.put(`/products/${editProductId}`, data);
+        setMessage("Product updated successfully");
+      } else {
+        await API.post("/products", data);
+        setMessage("Product added successfully");
+      }
+
+      setProductForm({ name: "", description: "", price: "", stock: "", image: null });
+      setEditProductId(null);
+      loadProducts();
+    } catch (err) {
+      setMessage(err.response?.data?.message || err.response?.data?.error || err.message || "Failed to save product");
+    }
+  };
+
+  const updateProfile = async (e) => {
+    e.preventDefault();
+    try {
+      await API.put(`/users/${user.id}`, { name: profileName });
+      const updatedUser = { ...user, name: profileName };
+      localStorage.setItem("user", JSON.stringify(updatedUser));
+      setMessage("Profile updated successfully");
+    } catch (err) {
+      setMessage(err.response?.data?.message || "Failed to update profile");
+    }
+  };
+
+  const logout = () => {
+    localStorage.removeItem("user");
+    localStorage.removeItem("email");
+    navigate("/login");
+  };
+
+  const editProduct = (product) => {
+    setEditProductId(product.id);
+    setProductForm({
+      name: product.name,
+      description: product.description,
+      price: product.price,
+      stock: product.stock,
+      image: null
     });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const resetSupplierForm = () => {
-    setEditingSupplierId(null);
-    setSupplierForm({
-      name: "",
-      phone: "",
-      email: "",
-      address: "",
-    });
-  };
-
-  const resetStockForm = () => {
-    setEditingStockId(null);
-    setStockForm({
-      supplier_id: "",
-      product_name: "",
-      quantity: "",
-      remaining_quantity: "",
-      cost_price: "",
-    });
+  const removeProduct = async (id) => {
+    try {
+      await API.delete(`/products/${id}`);
+      setMessage("Product deleted successfully");
+      loadProducts();
+    } catch (err) {
+      setMessage(err.response?.data?.message || "Failed to delete product");
+    }
   };
 
   const addSupplier = async (e) => {
     e.preventDefault();
-
     try {
-      const res = await API.post("/shopkeeper/suppliers", supplierForm, {
-        headers,
-      });
-
-      if (res.data.status === "Success") {
-        resetSupplierForm();
-        fetchAll();
-      } else {
-        setError(res.data.message);
-      }
-    } catch {
-      setError("Failed to add supplier");
-    }
-  };
-
-  const startEditSupplier = (supplier) => {
-    setEditingSupplierId(supplier.id);
-    setSupplierForm({
-      name: supplier.name || "",
-      phone: supplier.phone || "",
-      email: supplier.email || "",
-      address: supplier.address || "",
-    });
-
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const updateSupplier = async (e) => {
-    e.preventDefault();
-
-    try {
-      const res = await API.put(
-        `/shopkeeper/suppliers/${editingSupplierId}`,
-        supplierForm,
-        { headers }
-      );
-
-      if (res.data.status === "Success") {
-        resetSupplierForm();
-        fetchAll();
-      } else {
-        setError(res.data.message);
-      }
-    } catch {
-      setError("Failed to update supplier");
+      await API.post("/suppliers", { ...supplierForm, shopkeeper_id: user.id });
+      setMessage("Supplier added successfully");
+      setSupplierForm({ name: "", phone: "", email: "", address: "" });
+      loadSuppliers();
+    } catch (err) {
+      setMessage(err.response?.data?.message || err.response?.data?.error || "Failed to add supplier");
     }
   };
 
   const deleteSupplier = async (id) => {
-    if (!window.confirm("Delete this supplier?")) return;
-
     try {
-      const res = await API.delete(`/shopkeeper/suppliers/${id}`, { headers });
-
-      if (res.data.status === "Success") fetchAll();
-      else setError(res.data.message);
-    } catch {
-      setError("Failed to delete supplier");
+      await API.delete(`/suppliers/${id}`);
+      setMessage("Supplier deleted successfully");
+      loadSuppliers();
+    } catch (err) {
+      setMessage(err.response?.data?.message || "Failed to delete supplier");
     }
   };
 
   const receiveStock = async (e) => {
     e.preventDefault();
-
     try {
-      const res = await API.post("/shopkeeper/receive-stock", stockForm, {
-        headers,
+      await API.post("/supplier-stock", {
+        ...stockForm,
+        shopkeeper_id: user.id
       });
-
-      if (res.data.status === "Success") {
-        resetStockForm();
-        fetchAll();
-      } else {
-        setError(res.data.message);
-      }
-    } catch {
-      setError("Failed to receive stock");
+      setMessage("Stock received successfully");
+      setStockForm({ supplier_id: "", product_id: "", quantity: "", cost_price: "" });
+      loadProducts();
+      loadSupplierStock();
+    } catch (err) {
+      setMessage(err.response?.data?.message || err.response?.data?.error || err.message || "Failed to receive stock");
     }
   };
 
-  const startEditStock = (stock) => {
-    setEditingStockId(stock.id);
-    setStockForm({
-      supplier_id: String(stock.supplier_id || ""),
-      product_name: stock.product_name || "",
-      quantity: stock.quantity || "",
-      remaining_quantity: stock.remaining_quantity || "",
-      cost_price: stock.cost_price || "",
-    });
+  useEffect(() => {
+    loadProducts();
+    loadSuppliers();
+    loadOrders();
+    loadSupplierStock();
+  }, []);
 
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const updateStock = async (e) => {
-    e.preventDefault();
-
-    try {
-      const res = await API.put(
-        `/shopkeeper/received-stock/${editingStockId}`,
-        stockForm,
-        { headers }
-      );
-
-      if (res.data.status === "Success") {
-        resetStockForm();
-        fetchAll();
-      } else {
-        setError(res.data.message);
-      }
-    } catch {
-      setError("Failed to update stock");
-    }
-  };
-
-  const deleteStock = async (id) => {
-    if (!window.confirm("Delete this received stock record?")) return;
-
-    try {
-      const res = await API.delete(`/shopkeeper/received-stock/${id}`, {
-        headers,
-      });
-
-      if (res.data.status === "Success") fetchAll();
-      else setError(res.data.message);
-    } catch {
-      setError("Failed to delete stock");
-    }
-  };
-
-  const addProduct = async (e) => {
-    e.preventDefault();
-
-    try {
-      const res = await API.post("/shopkeeper/products", productForm, {
-        headers,
-      });
-
-      if (res.data.status === "Success") {
-        setProductForm({
-          title: "",
-          description: "",
-          price: "",
-          quantity: "",
-          unit: "number",
-          type: "product",
-          supplier_id: "",
-        });
-
-        fetchAll();
-      } else {
-        setError(res.data.message);
-      }
-    } catch {
-      setError("Failed to add product");
-    }
-  };
-
-  const addInventory = async (e) => {
-    e.preventDefault();
-
-    if (!inventoryForm.product_id || !inventoryForm.addQuantity) {
-      setError("Select product and enter quantity");
-      return;
-    }
-
-    try {
-      const res = await API.put(
-        `/shopkeeper/products/${inventoryForm.product_id}/add-inventory`,
-        { addQuantity: inventoryForm.addQuantity },
-        { headers }
-      );
-
-      if (res.data.status === "Success") {
-        setInventoryForm({
-          product_id: "",
-          addQuantity: "",
-        });
-
-        fetchAll();
-      } else {
-        setError(res.data.message);
-      }
-    } catch {
-      setError("Failed to add inventory");
-    }
-  };
-
-  const deleteProduct = async (id) => {
-    if (!window.confirm("Delete this product?")) return;
-
-    try {
-      await API.delete(`/shopkeeper/products/${id}`, { headers });
-      fetchAll();
-    } catch {
-      setError("Failed to delete product");
-    }
-  };
-
-  const updateOrderStatus = async (id, status) => {
-    try {
-      await API.put(`/orders/${id}/status`, { status }, { headers });
-      fetchAll();
-    } catch {
-      setError("Failed to update order");
-    }
-  };
-
-  const filteredOrders = orders.filter((order) => {
-    const search = billingSearch.toLowerCase();
-
-    return (
-      String(order.id).includes(search) ||
-      String(order.customer_name || "").toLowerCase().includes(search) ||
-      String(order.customer_email || "").toLowerCase().includes(search) ||
-      String(order.title || "").toLowerCase().includes(search) ||
-      String(order.status || "").toLowerCase().includes(search)
-    );
-  });
-
-  const totalInventory = items.reduce((sum, item) => {
-    return sum + Number(item.quantity || 0);
-  }, 0);
-
-  const totalOrders = orders.length;
-
-  const totalSales = orders
-    .filter((order) => order.status === "completed")
-    .reduce((sum, order) => {
-      const amount =
-        Number(order.total_amount) > 0
-          ? Number(order.total_amount)
-          : Number(order.price || 0) * Number(order.quantity || 1);
-
-      return sum + amount;
-    }, 0);
+  const totalInventory = products.reduce((sum, product) => sum + Number(product.stock || 0), 0);
+  const completedOrders = orders.filter((order) => order.status?.toLowerCase() === "completed").length;
+  const totalSales = orders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
 
   return (
-    <div className="layout">
-      <aside className="sidebar">
+    <div className="page">
+      <div className="topbar">
         <div>
-          <h2>Shopkeeper</h2>
-          <p>{user.name}</p>
-          <p>{user.email}</p>
-          <p>Contact: shop@marketplace.com</p>
-          <p>Phone: +91 9876543210</p>
-        </div>
-
-        <button className="logout-btn" onClick={logout}>
-          Logout
-        </button>
-      </aside>
-
-      <main className="main">
-        <div className="top-card">
           <h1>Shopkeeper Panel</h1>
-          <p>Manage products, suppliers, inventory and orders</p>
+          <p>Manage products, suppliers, stock receipts, and orders from one colorful dashboard.</p>
         </div>
 
-        {error && <div className="error">{error}</div>}
-
-        <div className="stats">
-          <div className="stat-card">
-            <span>Total Inventory</span>
-            <h2>{totalInventory}</h2>
-          </div>
-
-          <div className="stat-card">
-            <span>Total Orders</span>
-            <h2>{totalOrders}</h2>
-          </div>
-
-          <div className="stat-card">
-            <span>Completed Sales</span>
-            <h2>₹{totalSales.toFixed(2)}</h2>
-          </div>
-        </div>
-
-        <h2 className="section-title">
-          {editingSupplierId ? "Edit Supplier" : "Add Supplier"}
-        </h2>
-
-        <form
-          className="form-card"
-          onSubmit={editingSupplierId ? updateSupplier : addSupplier}
-        >
-          <label>Supplier Name</label>
-          <input
-            name="name"
-            value={supplierForm.name}
-            onChange={handleSupplierChange}
-            placeholder="Supplier name"
-            required
-          />
-
-          <label>Phone</label>
-          <input
-            name="phone"
-            value={supplierForm.phone}
-            onChange={handleSupplierChange}
-            placeholder="Phone number"
-          />
-
-          <label>Email</label>
-          <input
-            name="email"
-            value={supplierForm.email}
-            onChange={handleSupplierChange}
-            placeholder="Email"
-          />
-
-          <label>Address</label>
-          <textarea
-            name="address"
-            value={supplierForm.address}
-            onChange={handleSupplierChange}
-            placeholder="Address"
-          />
-
-          <button type="submit">
-            {editingSupplierId ? "Update Supplier" : "Add Supplier"}
+        <div className="action-row">
+          <Link to="/shopkeeper-bills" className="btn secondary">View Orders</Link>
+          <Link to="/admin" className="btn">Admin Panel</Link>
+          <button className="btn danger" onClick={logout}>
+            Logout
           </button>
+        </div>
+      </div>
 
-          {editingSupplierId && (
-            <button
-              type="button"
-              className="danger-btn"
-              onClick={resetSupplierForm}
+      {message && <p className="message">{message}</p>}
+
+      <form onSubmit={updateProfile} className="form">
+        <h2>Edit Profile Name</h2>
+        <input
+          type="text"
+          placeholder="Your Name"
+          required
+          value={profileName}
+          onChange={(e) => setProfileName(e.target.value)}
+        />
+        <button className="btn" type="submit">Save Name</button>
+      </form>
+
+      <div className="stats-grid">
+        <div className="card highlight">
+          <h2>{products.length}</h2>
+          <p>Products / Services</p>
+        </div>
+        <div className="card highlight">
+          <h2>{totalInventory}</h2>
+          <p>Total Inventory</p>
+        </div>
+        <div className="card highlight">
+          <h2>{orders.length}</h2>
+          <p>Total Orders</p>
+        </div>
+        <div className="card highlight">
+          <h2>{completedOrders}</h2>
+          <p>Completed Sales</p>
+        </div>
+        <div className="card highlight">
+          <h2>₹{totalSales}</h2>
+          <p>Total Revenue</p>
+        </div>
+      </div>
+
+      <div className="stats-grid">
+        <div className="card contact-card">
+          <h2>Contact Support</h2>
+          <p>If you need assistance, email atherwani333@gmail.com</p>
+          <p>Phone: +91 9149756267</p>
+          <p>Address: Bulgam Sopore, Baramulla, India</p>
+          <p>Admin and customer support are available for billing, inventory, and supplier issues.</p>
+        </div>
+      </div>
+
+      <form onSubmit={saveProduct} className="form">
+        <h2>{editProductId ? "Edit Product or Service" : "Add Product or Service"}</h2>
+
+        <input
+          type="text"
+          placeholder="Name"
+          required
+          value={productForm.name}
+          onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+        />
+
+        <textarea
+          placeholder="Description"
+          value={productForm.description}
+          onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
+        />
+
+        <input
+          type="number"
+          placeholder="Price"
+          required
+          value={productForm.price}
+          onChange={(e) => setProductForm({ ...productForm, price: e.target.value })}
+        />
+
+        <input
+          type="number"
+          placeholder="Stock"
+          value={productForm.stock}
+          onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })}
+        />
+
+        <input
+          type="file"
+          accept="image/*"
+          onChange={(e) => setProductForm({ ...productForm, image: e.target.files[0] })}
+        />
+
+        <button className="btn" type="submit">
+          {editProductId ? "Update Product" : "Add Product"}
+        </button>
+      </form>
+
+      <div className="grid">
+        <div className="card">
+          <h2>Supplier List</h2>
+          <form onSubmit={addSupplier} className="form">
+            <input
+              type="text"
+              placeholder="Supplier Name"
+              required
+              value={supplierForm.name}
+              onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })}
+            />
+            <input
+              type="text"
+              placeholder="Phone"
+              value={supplierForm.phone}
+              onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })}
+            />
+            <input
+              type="email"
+              placeholder="Email"
+              value={supplierForm.email}
+              onChange={(e) => setSupplierForm({ ...supplierForm, email: e.target.value })}
+            />
+            <textarea
+              placeholder="Address"
+              value={supplierForm.address}
+              onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })}
+            />
+            <button className="btn" type="submit">Add Supplier</button>
+          </form>
+
+          {suppliers.length === 0 ? (
+            <p>No suppliers yet.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {suppliers.map((supplier) => (
+                  <tr key={supplier.id}>
+                    <td>{supplier.name}</td>
+                    <td>{supplier.email || "-"}</td>
+                    <td>{supplier.phone || "-"}</td>
+                    <td>
+                      <button className="btn secondary" onClick={() => deleteSupplier(supplier.id)}>
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="card">
+          <h2>Receive Stock from Supplier</h2>
+          {supplierStock.length > 0 && (
+            <p className="small-tag">
+              Last received: {supplierStock[0].quantity} x {supplierStock[0].product_name} from {supplierStock[0].supplier_name || "supplier"} on {new Date(supplierStock[0].created_at).toLocaleString()}
+            </p>
+          )}
+          <form onSubmit={receiveStock} className="form">
+            <select
+              required
+              value={stockForm.supplier_id}
+              onChange={(e) => setStockForm({ ...stockForm, supplier_id: e.target.value })}
             >
-              Cancel
-            </button>
-          )}
-        </form>
-
-        <h2 className="section-title">Suppliers List</h2>
-
-        {suppliers.length === 0 ? (
-          <div className="empty">No suppliers added</div>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Supplier</th>
-                <th>Phone</th>
-                <th>Email</th>
-                <th>Address</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
+              <option value="">Select Supplier</option>
               {suppliers.map((supplier) => (
-                <tr key={supplier.id}>
-                  <td>{supplier.name}</td>
-                  <td>{supplier.phone}</td>
-                  <td>{supplier.email}</td>
-                  <td>{supplier.address}</td>
-                  <td>
-                    <button onClick={() => startEditSupplier(supplier)}>
-                      Edit
-                    </button>
-                    <button
-                      className="danger-btn"
-                      onClick={() => deleteSupplier(supplier.id)}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
+                <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
               ))}
-            </tbody>
-          </table>
-        )}
-
-        <h2 className="section-title">
-          {editingStockId
-            ? "Edit Received Stock"
-            : "Receive Stock From Supplier"}
-        </h2>
-
-        <form
-          className="form-card"
-          onSubmit={editingStockId ? updateStock : receiveStock}
-        >
-          <label>Supplier</label>
-          <select
-            name="supplier_id"
-            value={stockForm.supplier_id}
-            onChange={handleStockChange}
-            required
-          >
-            <option value="">Select supplier</option>
-            {suppliers.map((supplier) => (
-              <option key={supplier.id} value={supplier.id}>
-                {supplier.name}
-              </option>
-            ))}
-          </select>
-
-          <label>Product Name</label>
-          <input
-            name="product_name"
-            value={stockForm.product_name}
-            onChange={handleStockChange}
-            placeholder="Product received"
-            required
-          />
-
-          <label>Quantity Received</label>
-          <input
-            type="number"
-            name="quantity"
-            value={stockForm.quantity}
-            onChange={handleStockChange}
-            required
-          />
-
-          <label>Products Left</label>
-          <input
-            type="number"
-            name="remaining_quantity"
-            value={stockForm.remaining_quantity}
-            onChange={handleStockChange}
-          />
-
-          <label>Cost Price</label>
-          <input
-            type="number"
-            name="cost_price"
-            value={stockForm.cost_price}
-            onChange={handleStockChange}
-            required
-          />
-
-          <button type="submit">
-            {editingStockId ? "Update Stock" : "Save Stock"}
-          </button>
-
-          {editingStockId && (
-            <button type="button" className="danger-btn" onClick={resetStockForm}>
-              Cancel
-            </button>
-          )}
-        </form>
-
-        <h2 className="section-title">Received Stock From Suppliers</h2>
-
-        {receivedStock.length === 0 ? (
-          <div className="empty">No stock records</div>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Supplier</th>
-                <th>Product</th>
-                <th>Received</th>
-                <th>Left</th>
-                <th>Cost Price</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {receivedStock.map((stock) => (
-                <tr key={stock.id}>
-                  <td>{stock.supplier_name}</td>
-                  <td>{stock.product_name}</td>
-                  <td>{stock.quantity}</td>
-                  <td>{stock.remaining_quantity}</td>
-                  <td>₹{Number(stock.cost_price).toFixed(2)}</td>
-                  <td>
-                    <button onClick={() => startEditStock(stock)}>Edit</button>
-                    <button
-                      className="danger-btn"
-                      onClick={() => deleteStock(stock.id)}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
+            </select>
+            <select
+              required
+              value={stockForm.product_id}
+              onChange={(e) => setStockForm({ ...stockForm, product_id: e.target.value })}
+            >
+              <option value="">Select Product</option>
+              {products.map((product) => (
+                <option key={product.id} value={product.id}>{product.name}</option>
               ))}
-            </tbody>
-          </table>
-        )}
+            </select>
+            <input
+              type="number"
+              placeholder="Quantity Received"
+              required
+              value={stockForm.quantity}
+              onChange={(e) => setStockForm({ ...stockForm, quantity: e.target.value })}
+            />
+            <input
+              type="number"
+              placeholder="Cost Price"
+              value={stockForm.cost_price}
+              onChange={(e) => setStockForm({ ...stockForm, cost_price: e.target.value })}
+            />
+            <button className="btn" type="submit">Receive Stock</button>
+          </form>
+        </div>
+      </div>
 
-        <h2 className="section-title">Add Product / Service</h2>
-
-        <form className="form-card" onSubmit={addProduct}>
-          <label>Title</label>
-          <input
-            name="title"
-            value={productForm.title}
-            onChange={handleProductChange}
-            placeholder="Product title"
-            required
-          />
-
-          <label>Description</label>
-          <textarea
-            name="description"
-            value={productForm.description}
-            onChange={handleProductChange}
-            required
-          />
-
-          <label>Price</label>
-          <input
-            type="number"
-            name="price"
-            value={productForm.price}
-            onChange={handleProductChange}
-            required
-          />
-
-          <label>Quantity</label>
-          <input
-            type="number"
-            name="quantity"
-            value={productForm.quantity}
-            onChange={handleProductChange}
-          />
-
-          <label>Unit</label>
-          <select
-            name="unit"
-            value={productForm.unit}
-            onChange={handleProductChange}
-          >
-            <option value="kg">KG</option>
-            <option value="liter">Liter</option>
-            <option value="number">Number</option>
-            <option value="dozen">Dozen</option>
-          </select>
-
-          <label>Type</label>
-          <select
-            name="type"
-            value={productForm.type}
-            onChange={handleProductChange}
-          >
-            <option value="product">Product</option>
-            <option value="service">Service</option>
-          </select>
-
-          <label>Supplier</label>
-          <select
-            name="supplier_id"
-            value={productForm.supplier_id}
-            onChange={handleProductChange}
-          >
-            <option value="">No supplier</option>
-            {suppliers.map((supplier) => (
-              <option key={supplier.id} value={supplier.id}>
-                {supplier.name}
-              </option>
-            ))}
-          </select>
-
-          <button type="submit">Add Product</button>
-        </form>
-
-        <h2 className="section-title">Add Inventory</h2>
-
-        <form className="form-card" onSubmit={addInventory}>
-          <label>Select Product</label>
-          <select
-            name="product_id"
-            value={inventoryForm.product_id}
-            onChange={handleInventoryChange}
-            required
-          >
-            <option value="">Select product</option>
-            {items.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.title} — Current: {item.quantity} {item.unit}
-              </option>
-            ))}
-          </select>
-
-          <label>Add Quantity</label>
-          <input
-            type="number"
-            name="addQuantity"
-            value={inventoryForm.addQuantity}
-            onChange={handleInventoryChange}
-            placeholder="How many to add?"
-            required
-          />
-
-          <button type="submit">Add Inventory</button>
-        </form>
-
-        <h2 className="section-title">Inventory</h2>
-
-        <div className="grid">
-          {items.map((item) => (
-            <div className="card" key={item.id}>
-              <span className="badge">{item.type}</span>
-              <h3>{item.title}</h3>
-              <p>{item.description}</p>
-              <p>Supplier: {item.supplier_name || "No supplier"}</p>
-              <p>
-                Quantity: {item.quantity} {item.unit}
-              </p>
-              <div className="price">
-                ₹{Number(item.price).toFixed(2)} / {item.unit}
+      <div className="stats-grid">
+        <div className="card">
+          <h2>Received Stock History</h2>
+          {supplierStock.length === 0 ? (
+            <p>No stock receipts yet.</p>
+          ) : (
+            supplierStock.map((entry) => (
+              <div key={entry.id} className="bill">
+                <p><strong>{entry.product_name}</strong> from {entry.supplier_name || "Unknown Supplier"}</p>
+                <p>Qty: {entry.quantity} | Cost: ₹{entry.cost_price}</p>
+                <p className="small-tag">Received: {new Date(entry.created_at).toLocaleString()}</p>
               </div>
-              <button
-                className="danger-btn"
-                onClick={() => deleteProduct(item.id)}
-              >
-                Delete
-              </button>
+            ))
+          )}
+        </div>
+      </div>
+
+      <h2>Inventory</h2>
+      <div className="grid">
+        {products.map((product) => (
+          <div className="card" key={product.id}>
+            {product.image && (
+              <img
+                src={`${API.defaults.baseURL}${product.image}`}
+                alt={product.name}
+                className="product-img"
+              />
+            )}
+            <h3>{product.name}</h3>
+            <p>{product.description}</p>
+            <p><strong>Price:</strong> ₹{product.price}</p>
+            <p><strong>Stock:</strong> {product.stock}</p>
+            <div className="action-row">
+              <button className="btn secondary" onClick={() => editProduct(product)}>Edit</button>
+              <button className="btn danger" onClick={() => removeProduct(product.id)}>Delete</button>
             </div>
-          ))}
-        </div>
-
-        <h2 className="section-title">Billing / Order Details</h2>
-
-        <div className="form-card">
-          <label>Search Orders</label>
-          <input
-            value={billingSearch}
-            onChange={(e) => setBillingSearch(e.target.value)}
-            placeholder="Search by customer, email, product, status, bill ID"
-          />
-        </div>
-
-        {filteredOrders.length === 0 ? (
-          <div className="empty">No customer orders found</div>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Bill ID</th>
-                <th>Customer</th>
-                <th>Email</th>
-                <th>Product</th>
-                <th>Qty</th>
-                <th>Total</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {filteredOrders.map((order) => (
-                <tr key={order.id}>
-                  <td>INV-{order.id}</td>
-                  <td>{order.customer_name}</td>
-                  <td>{order.customer_email}</td>
-                  <td>{order.title}</td>
-                  <td>
-                    {order.quantity} {order.unit}
-                  </td>
-                  <td>₹{Number(order.total_amount || 0).toFixed(2)}</td>
-                  <td>{order.status}</td>
-                  <td>
-                    <button onClick={() => updateOrderStatus(order.id, "accepted")}>
-                      Accept
-                    </button>
-                    <button onClick={() => updateOrderStatus(order.id, "completed")}>
-                      Complete
-                    </button>
-                    <button
-                      className="danger-btn"
-                      onClick={() => updateOrderStatus(order.id, "rejected")}
-                    >
-                      Reject
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </main>
+          </div>
+        ))}
+      </div>
     </div>
   );
-};
+}
 
 export default Shopkeeper;

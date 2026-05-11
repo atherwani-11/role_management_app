@@ -40,40 +40,47 @@ const ForgotPassword = () => {
 
   return (
     <div className="auth-page">
-      <form className="auth-card" onSubmit={handleReset}>
-        <div className="auth-logo">🔐</div>
+      <div className="auth-card">
+        <div className="auth-header">
+          <div className="auth-logo">🔐</div>
+          <div>
+            <h1>Reset Password</h1>
+            <p>Securely update your password and return to your dashboard.</p>
+          </div>
+        </div>
 
-        <h2>Forgot Password</h2>
-        <p>Reset your password using your email</p>
+        <form className="form auth-form" onSubmit={handleReset}>
+          {error && <div className="error">{error}</div>}
 
-        {error && <div className="error">{error}</div>}
+          <label>Email</label>
+          <input
+            type="email"
+            name="email"
+            placeholder="Enter your email"
+            value={formData.email}
+            onChange={handleChange}
+            required
+          />
 
-        <label>Email</label>
-        <input
-          type="email"
-          name="email"
-          placeholder="Enter your email"
-          value={formData.email}
-          onChange={handleChange}
-          required
-        />
+          <label>New Password</label>
+          <input
+            type="password"
+            name="newPassword"
+            placeholder="Enter new password"
+            value={formData.newPassword}
+            onChange={handleChange}
+            required
+          />
 
-        <label>New Password</label>
-        <input
-          type="password"
-          name="newPassword"
-          placeholder="Enter new password"
-          value={formData.newPassword}
-          onChange={handleChange}
-          required
-        />
+          <button type="submit" className="btn">
+            Update Password
+          </button>
 
-        <button type="submit">Update Password</button>
-
-        <p>
-          Remember password? <Link to="/login">Login</Link>
-        </p>
-      </form>
+          <p className="auth-footer">
+            Remember password? <Link to="/login">Login</Link>
+          </p>
+        </form>
+      </div>
     </div>
   );
 };

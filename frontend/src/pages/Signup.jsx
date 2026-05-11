@@ -52,59 +52,64 @@ const Signup = () => {
 
   return (
     <div className="auth-page">
-      <form className="auth-card" onSubmit={handleSubmit}>
-        <div className="auth-logo">🧾</div>
+      <div className="auth-card">
+        <div className="auth-header">
+          <div className="auth-logo">🧾</div>
+          <div>
+            <h1>Create Account</h1>
+            <p>Choose your role and start managing orders, inventory, or sales.</p>
+          </div>
+        </div>
 
-        <h2>Create Account</h2>
-        <p>Create your account by selecting your role</p>
+        <form className="form auth-form" onSubmit={handleSubmit}>
+          {error && <div className="error">{error}</div>}
 
-        {error && <div className="error">{error}</div>}
+          <label>Full Name</label>
+          <input
+            type="text"
+            name="name"
+            placeholder="Enter full name"
+            value={formData.name}
+            onChange={handleChange}
+            required
+          />
 
-        <label>Full Name</label>
-        <input
-          type="text"
-          name="name"
-          placeholder="Enter full name"
-          value={formData.name}
-          onChange={handleChange}
-          required
-        />
+          <label>Email</label>
+          <input
+            type="email"
+            name="email"
+            placeholder="Enter email"
+            value={formData.email}
+            onChange={handleChange}
+            required
+          />
 
-        <label>Email</label>
-        <input
-          type="email"
-          name="email"
-          placeholder="Enter email"
-          value={formData.email}
-          onChange={handleChange}
-          required
-        />
+          <label>Password</label>
+          <input
+            type="password"
+            name="password"
+            placeholder="Enter password"
+            value={formData.password}
+            onChange={handleChange}
+            required
+          />
 
-        <label>Password</label>
-        <input
-          type="password"
-          name="password"
-          placeholder="Enter password"
-          value={formData.password}
-          onChange={handleChange}
-          required
-        />
+          <label>Role</label>
+          <select name="role" value={formData.role} onChange={handleChange}>
+            <option value="customer">Customer</option>
+            <option value="shopkeeper">Shopkeeper</option>
+            <option value="admin">Admin</option>
+          </select>
 
-        <label>Role</label>
-        <select name="role" value={formData.role} onChange={handleChange}>
-          <option value="customer">Customer</option>
-          <option value="shopkeeper">Shopkeeper</option>
-          <option value="admin">Admin</option>
-        </select>
+          <button type="submit" disabled={loading} className="btn">
+            {loading ? "Creating..." : "Create Account"}
+          </button>
 
-        <button type="submit" disabled={loading}>
-          {loading ? "Creating..." : "Create Account"}
-        </button>
-
-        <p>
-          Already have account? <Link to="/login">Login</Link>
-        </p>
-      </form>
+          <p className="auth-footer">
+            Already have an account? <Link to="/login">Login</Link>
+          </p>
+        </form>
+      </div>
     </div>
   );
 };

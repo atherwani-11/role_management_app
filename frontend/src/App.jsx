@@ -1,73 +1,38 @@
 import React from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { AuthProvider, useAuth } from "./AuthContext";
+import { Routes, Route, Navigate } from "react-router-dom";
 
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/ForgotPassword";
 import Customer from "./pages/Customer";
+import Cart from "./pages/Cart";
+import CustomerBills from "./pages/CustomerBills";
+import CustomerContact from "./pages/CustomerContact";
 import Shopkeeper from "./pages/Shopkeeper";
+import ShopkeeperBills from "./pages/ShopkeeperBills";
 import Admin from "./pages/Admin";
 
-const ProtectedRoute = ({ children, role }) => {
-  const { user, loading } = useAuth();
+import "./styles/style.css";
 
-  if (loading) return <div className="loading">Loading...</div>;
-
-  if (!user) return <Navigate to="/login" replace />;
-
-  if (role && user.role !== role) return <Navigate to="/login" replace />;
-
-  return children;
-};
-
-const AppRoutes = () => {
+function App() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/login" replace />} />
-
+      <Route path="/" element={<Navigate to="/login" />} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
 
-      <Route
-        path="/customer"
-        element={
-          <ProtectedRoute role="customer">
-            <Customer />
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/customer" element={<Customer />} />
+      <Route path="/cart" element={<Cart />} />
+      <Route path="/customer-bills" element={<CustomerBills />} />
+      <Route path="/customer-contact" element={<CustomerContact />} />
 
-      <Route
-        path="/shopkeeper"
-        element={
-          <ProtectedRoute role="shopkeeper">
-            <Shopkeeper />
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/shopkeeper" element={<Shopkeeper />} />
+      <Route path="/shopkeeper-bills" element={<ShopkeeperBills />} />
 
-      <Route
-        path="/admin"
-        element={
-          <ProtectedRoute role="admin">
-            <Admin />
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/admin" element={<Admin />} />
     </Routes>
   );
-};
-
-const App = () => {
-  return (
-    <AuthProvider>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
-    </AuthProvider>
-  );
-};
+}
 
 export default App;

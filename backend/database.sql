@@ -1,39 +1,42 @@
 CREATE DATABASE IF NOT EXISTS role_management_app;
 USE role_management_app;
 
-DROP TABLE IF EXISTS orders;
-DROP TABLE IF EXISTS products;
-DROP TABLE IF EXISTS users;
-
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS products (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(100) NOT NULL,
-  email VARCHAR(100) UNIQUE NOT NULL,
-  password VARCHAR(255) NOT NULL,
-  role ENUM('customer', 'shopkeeper', 'admin') DEFAULT 'customer',
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  price DECIMAL(10,2) NOT NULL,
+  stock INT DEFAULT 0,
+  image VARCHAR(255),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE products (
+CREATE TABLE IF NOT EXISTS cart (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  shopkeeper_id INT NOT NULL,
-  title VARCHAR(150) NOT NULL,
-  description TEXT,
-  price DECIMAL(10,2) NOT NULL,
-  type ENUM('product', 'service') DEFAULT 'product',
-  status ENUM('active', 'inactive') DEFAULT 'active',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (shopkeeper_id) REFERENCES users(id) ON DELETE CASCADE
+  customer_email VARCHAR(255) NOT NULL,
+  product_id INT NOT NULL,
+  quantity INT DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  customer_id INT NOT NULL,
+  customer_email VARCHAR(255) NOT NULL,
+  customer_name VARCHAR(255),
+  phone VARCHAR(50),
+  address TEXT,
+  payment_method VARCHAR(50) DEFAULT 'Cash on Delivery',
+  total_amount DECIMAL(10,2),
+  status VARCHAR(50) DEFAULT 'Pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS order_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  order_id INT NOT NULL,
   product_id INT NOT NULL,
-  shopkeeper_id INT NOT NULL,
-  status ENUM('pending', 'accepted', 'rejected', 'completed') DEFAULT 'pending',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (customer_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
-  FOREIGN KEY (shopkeeper_id) REFERENCES users(id) ON DELETE CASCADE
+  product_name VARCHAR(255),
+  price DECIMAL(10,2),
+  quantity INT,
+  subtotal DECIMAL(10,2)
 );

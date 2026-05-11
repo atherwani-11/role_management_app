@@ -1,0 +1,8 @@
+{
+  "appId": "com.example.app",
+  "appName": "role-management-frontend",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "http"
+  }
+}
