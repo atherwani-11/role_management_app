@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const isAndroid = /Android/i.test(navigator.userAgent);
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || (isAndroid ? "http://10.0.2.2:8081" : "http://localhost:8081");
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "https://role-management-app.onrender.com" || (isAndroid ? "http://10.0.2.2:8081" : "http://localhost:8081");
 
 const API = axios.create({
   baseURL: apiBaseUrl,
