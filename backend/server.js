@@ -23,12 +23,21 @@ app.use("/uploads", express.static(uploadsPath));
 
 const PORT = process.env.PORT || 8081;
 
+const dbHost = process.env.DB_HOST || process.env.MYSQLHOST || "localhost";
+const dbPort = process.env.DB_PORT || process.env.MYSQLPORT || "3306";
+const dbUser = process.env.DB_USER || process.env.MYSQLUSER || "root";
+const dbPassword = process.env.DB_PASSWORD || process.env.MYSQLPASSWORD || "";
+const dbName = process.env.DB_NAME || process.env.MYSQLDATABASE || "railway";
+
+console.log("Using DB_HOST=", dbHost);
+console.log("Using DB_NAME=", dbName);
+
 const pool = mysql.createPool({
-  host: process.env.DB_HOST || "localhost",
-  port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306,
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "",
-  database: process.env.DB_NAME || "railway",
+  host: dbHost,
+  port: Number(dbPort),
+  user: dbUser,
+  password: dbPassword,
+  database: dbName,
   waitForConnections: true,
   connectionLimit: 10
 });
