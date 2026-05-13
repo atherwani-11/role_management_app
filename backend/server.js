@@ -23,24 +23,42 @@ app.use("/uploads", express.static(uploadsPath));
 
 const PORT = process.env.PORT || 8081;
 
-const dbHost = process.env.DB_HOST || process.env.MYSQLHOST || "localhost";
-const dbPort = process.env.DB_PORT || process.env.MYSQLPORT || "3306";
-const dbUser = process.env.DB_USER || process.env.MYSQLUSER || "root";
-const dbPassword = process.env.DB_PASSWORD || process.env.MYSQLPASSWORD || "";
-const dbName = process.env.DB_NAME || process.env.MYSQLDATABASE || "railway";
+const dbUrl = process.env.DATABASE_URL || process.env.MYSQL_URL;
 
-console.log("Using DB_HOST=", dbHost);
-console.log("Using DB_NAME=", dbName);
+let dbConfig;
+if (dbUrl) {
+  const parsedUrl = new URL(dbUrl);
+  dbConfig = {
+    host: parsedUrl.hostname,
+    port: parsedUrl.port ? Number(parsedUrl.port) : 3306,
+    user: parsedUrl.username,
+    password: parsedUrl.password,
+    database: parsedUrl.pathname?.slice(1) || process.env.DB_NAME || process.env.MYSQLDATABASE || "railway",
+    waitForConnections: true,
+    connectionLimit: 10
+  };
+} else {
+  const dbHost = process.env.DB_HOST || process.env.MYSQLHOST || "localhost";
+  const dbPort = process.env.DB_PORT || process.env.MYSQLPORT || "3306";
+  const dbUser = process.env.DB_USER || process.env.MYSQLUSER || "root";
+  const dbPassword = process.env.DB_PASSWORD || process.env.MYSQLPASSWORD || "";
+  const dbName = process.env.DB_NAME || process.env.MYSQLDATABASE || "railway";
 
-const pool = mysql.createPool({
-  host: dbHost,
-  port: Number(dbPort),
-  user: dbUser,
-  password: dbPassword,
-  database: dbName,
-  waitForConnections: true,
-  connectionLimit: 10
-});
+  dbConfig = {
+    host: dbHost,
+    port: Number(dbPort),
+    user: dbUser,
+    password: dbPassword,
+    database: dbName,
+    waitForConnections: true,
+    connectionLimit: 10
+  };
+}
+
+console.log("Using DB_HOST=", dbConfig.host);
+console.log("Using DB_NAME=", dbConfig.database);
+
+const pool = mysql.createPool(dbConfig);
 
 /* CREATE TABLES */
 
